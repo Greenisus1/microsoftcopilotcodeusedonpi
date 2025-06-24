@@ -3,15 +3,13 @@ set -e
 LOGFILE="$HOME/steam_install_log.txt"
 exec > >(tee -a "$LOGFILE") 2>&1
 
-ANIM_PID=""
-RESUME_FLAG="/tmp/steam_resume.flag"
 REPO_NAME="BACKUP-PI$RANDOM"
 BACKUP_TAR="/tmp/$REPO_NAME.tar.gz"
 CLEANUP_PATHS=(~/.steam ~/.local/share/Steam ~/.wine ~/steam_pi_install)
+RESUME_FLAG="/tmp/steam_resume.flag"
+ANIM_TAB_TITLE="DVD Bounce"
 
-log() {
-  echo -e "\n[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
+log() { echo -e "\n[$(date '+%Y-%m-%d %H:%M:%S')] $1"; }
 
 cleanup() {
   log "🧹 Cleaning temp files..."
@@ -27,57 +25,36 @@ fatal_exit() {
   sudo reboot
 }
 
-start_animation() {
-  bash -c '
-  tput civis
-  trap "tput cnorm; exit" SIGINT SIGTERM
-  rows=$(tput lines)
-  cols=$(tput cols)
-  text="DVD"
-  len=${#text}
-  x=$((RANDOM % (cols - len)))
-  y=$((RANDOM % rows))
-  dx=1; dy=1; color=31
-  while true; do
-    load=$(awk "{print \$1}" /proc/loadavg)
-    (( $(echo "$load > 1.5" | bc -l) )) && sleep 3 && continue
-    tput cup $y $x
-    echo -ne "\e[${color}m$text\e[0m"
-    sleep 0.05
-    tput cup $y $x; echo -ne "   "
-    x=$((x + dx)); y=$((y + dy))
-    if (( x < 0 || x + len >= cols )); then dx=$(( -dx )); color=$(((color % 6) + 31)); fi
-    if (( y < 0 || y >= rows )); then dy=$(( -dy )); color=$(((color % 6) + 31)); fi
-  done
-  ' &
-  ANIM_PID=$!
+# 🌀 Launch DVD animation in its own terminal tab
+launch_dvd_animation_tab() {
+  gnome-terminal --tab --title="$ANIM_TAB_TITLE" -- bash -c '
+    tput civis
+    trap "tput cnorm; exit" SIGINT SIGTERM
+    rows=$(tput lines); cols=$(tput cols)
+    text="DVD"; len=${#text}
+    x=$((RANDOM % (cols - len))); y=$((RANDOM % rows))
+    dx=1; dy=1; color=31
+    while true; do
+      load=$(awk "{print \$1}" /proc/loadavg)
+      (( $(echo "$load > 1.5" | bc -l) )) && sleep 2 && continue
+      tput cup $y $x; echo -ne "\e[${color}m$text\e[0m"
+      sleep 0.05
+      tput cup $y $x; echo -ne "   "
+      x=$((x + dx)); y=$((y + dy))
+      if (( x <= 0 || x + len >= cols )); then dx=$(( -dx )); color=$(((color % 6) + 31)); fi
+      if (( y <= 0 || y >= rows )); then dy=$(( -dy )); color=$(((color % 6) + 31)); fi
+    done
+  '
 }
 
-stop_animation() {
-  [ -n "$ANIM_PID" ] && kill "$ANIM_PID" 2>/dev/null
-  tput cnorm
-}
-
-run_step() {
-  log "🔧 $1..."
-  if eval "$2"; then
-    log "✅ Success: $1"
-  else
-    log "❌ Failed: $1"
-    read -rp "Retry this step? (Y/n): " retry
-    if [[ "$retry" =~ ^[Yy]$ ]]; then
-      cleanup
-      eval "$2" || fatal_exit
-    else
-      fatal_exit
-    fi
-  fi
-}
-
+# 🗄️ Optional GitHub backup
 backup_to_github() {
   read -rp "GitHub username: " GH_USER
-  read -s -rp "GitHub PAT (classic, will not show): " GH_TOKEN
+  read -s -rp "GitHub PAT (Classic, will not show): " GH_TOKEN
   echo
+
+  # 🚀 Launch the DVD animation AFTER the token prompt
+  launch_dvd_animation_tab &
 
   log "📦 Archiving system files..."
   sudo tar --exclude='*/.cache/*' -czf "$BACKUP_TAR" /etc /home
@@ -103,12 +80,16 @@ backup_to_github() {
   log "✅ Backup complete."
 }
 
-delete_backup_repo() {
-  [ -z "$GH_USER" ] && return
-  [ -z "$GH_TOKEN" ] && return
-  curl -X DELETE -H "Authorization: token $GH_TOKEN" \
-       "https://api.github.com/repos/$GH_USER/$REPO_NAME"
-  log "🧼 Deleted backup repo $REPO_NAME"
+# 🧱 Core install steps
+run_step() {
+  log "🔧 $1..."
+  if eval "$2"; then
+    log "✅ Success: $1"
+  else
+    log "❌ Failed: $1"
+    read -rp "Retry this step? (Y/n): " retry
+    [[ "$retry" =~ ^[Yy]$ ]] && cleanup && eval "$2" || fatal_exit
+  fi
 }
 
 install_steam() {
@@ -116,51 +97,28 @@ install_steam() {
   run_step "Updating packages" "sudo apt update"
   run_step "Installing Box64/Box86" "sudo apt install -y box64-rpi4arm64 box86-rpi4arm64:armhf"
   run_step "Installing Wine and wget" "sudo apt install -y wine64 wget"
-  run_step "Creating Steam directory" "mkdir -p ~/steam_pi_install"
-  run_step "Downloading SteamSetup.exe" "wget -O ~/steam_pi_install/SteamSetup.exe https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe"
+  run_step "Creating Steam dir" "mkdir -p ~/steam_pi_install"
+  run_step "Downloading Steam installer" "wget -O ~/steam_pi_install/SteamSetup.exe https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe"
   run_step "Running Steam installer" "cd ~/steam_pi_install && wine SteamSetup.exe"
 }
 
-# === MAIN ===
-
+# 🏁 Entry point
 if [[ "$1" == "--resume" ]]; then
   log "⚙️ Resuming after reboot..."
   [ ! -f "$RESUME_FLAG" ] && echo "No resume flag found. Exiting." && exit 1
   rm -f "$RESUME_FLAG"
   install_steam
-  log "🎉 Installation resumed and completed!"
+  log "🎉 Resumed and completed!"
   exit 0
 fi
 
-log "🚀 Starting Steam installer..."
+log "🚀 Starting Steam installer on Raspberry Pi"
 
-log "🔍 Checking for updates..."
-sudo apt update
-updates=$(apt list --upgradable 2>/dev/null | grep -c "upgradable" || true)
-if (( updates > 0 )); then
-  echo "📦 $updates packages can be upgraded."
-  read -rp "Update now before Steam install? (Y/n): " update_choice
-  if [[ "$update_choice" =~ ^[Yy]$ ]]; then
-    sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y || log "⚠️ Update failed; continuing..."
-  fi
-fi
+read -rp "🛡️ Create emergency GitHub backup before install? (Y/n): " do_backup
+[[ "$do_backup" =~ ^[Yy]$ ]] && backup_to_github
 
-read -rp "🛡️ Create emergency backup to GitHub in case of failure? (Y/n): " do_backup
-if [[ "$do_backup" =~ ^[Yy]$ ]]; then
-  backup_to_github
-fi
-
-# Start animation ONLY after all prompts are finished
-start_animation
 install_steam
-stop_animation
 
 log "🎯 Steam installed! Launch it with:"
 echo -e "\nwine ~/.wine/drive_c/Program\\ Files\\ \\(x86\\)/Steam/Steam.exe\n"
-
-read -rp "🧽 Delete GitHub backup repo now? (Y/n): " delete_choice
-if [[ "$delete_choice" =~ ^[Yy]$ ]]; then
-  delete_backup_repo
-fi
-
-log "✅ All done. Log saved to $LOGFILE"
+log "✅ Installation complete. Log saved to $LOGFILE"

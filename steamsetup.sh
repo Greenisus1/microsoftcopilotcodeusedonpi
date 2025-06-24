@@ -1,49 +1,50 @@
 #!/bin/bash
 LOGFILE=~/steam_install_log.txt
 exec > >(tee -a "$LOGFILE") 2>&1
-set -e
+
+STEPS=(
+  "Remove old Steam and Wine|rm -rf ~/.steam ~/.local/share/Steam ~/.wine && sudo apt purge -y steam wine64 || true && sudo apt autoremove -y"
+  "Update packages|sudo apt update"
+  "Install Box64 and Box86|sudo apt install -y box64-rpi4arm64 box86-rpi4arm64:armhf"
+  "Install Wine and wget|sudo apt install -y wine64 wget"
+  "Create install directory|mkdir -p ~/steam_pi_install"
+  "Download SteamSetup.exe|wget -O ~/steam_pi_install/SteamSetup.exe https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe"
+  "Run Steam installer|cd ~/steam_pi_install && wine SteamSetup.exe"
+)
 
 log() {
-    echo -e "\n[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+  echo -e "\n[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
-try() {
-    log "$1"
-    if ! eval "$2"; then
-        log "❌ Failed: $1"
-        exit 1
+run_step() {
+  local step="$1"
+  local name="${step%%|*}"
+  local command="${step#*|}"
+
+  while true; do
+    log "🔧 $name"
+    if eval "$command"; then
+      log "✅ Success: $name"
+      return 0
     else
-        log "✅ Success: $1"
+      log "❌ Failed: $name"
+      read -rp "❓ Do you want to retry this step? (Y,n): " yn
+      case $yn in
+        [Yy]* ) log "🔁 Retrying $name...";;
+        [Nn]* ) log "⏭️ Skipped: $name"; return 1;;
+        * ) echo "Please enter Y or n.";;
+      esac
     fi
+  done
 }
 
-log "🔧 Starting Steam installation setup for Raspberry Pi..."
+log "🚀 Starting Steam setup for Raspberry Pi..."
 
-try "Removing previous Steam and Wine installations" \
-    "rm -rf ~/.steam ~/.local/share/Steam ~/.wine && sudo apt purge -y steam wine64 || true && sudo apt autoremove -y"
+for step in "${STEPS[@]}"; do
+  run_step "$step"
+done
 
-try "Updating package lists" \
-    "sudo apt update"
-
-try "Installing Box64, Box86, and Wine" \
-    "sudo apt install -y box64 box86 wine64 wget"
-
-try "Creating install directory" \
-    "mkdir -p ~/steam_pi_install && cd ~/steam_pi_install"
-
-try "Downloading SteamSetup.exe" \
-    "wget -O SteamSetup.exe https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe"
-
-log "🍷 Running Steam installer with Wine..."
-if wine SteamSetup.exe; then
-    log "✅ Steam installer launched successfully"
-else
-    log "❌ Steam installer failed to launch"
-    exit 1
-fi
-
-LAUNCH_CMD="wine ~/.wine/drive_c/Program\ Files\ \(x86\)/Steam/Steam.exe"
-log "🚀 To launch Steam in the future, run:"
+LAUNCH_CMD="wine ~/.wine/drive_c/Program\\ Files\\ \\(x86\\)/Steam/Steam.exe"
+log "🎯 All done! To launch Steam in the future, run:"
 echo -e "\n$LAUNCH_CMD\n"
-
-log "🎉 Installation complete. Log saved to $LOGFILE"
+log "📝 Installation log saved to $LOGFILE"

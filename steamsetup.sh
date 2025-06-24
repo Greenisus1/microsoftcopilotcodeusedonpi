@@ -1,30 +1,40 @@
 #!/bin/bash
-# Smart launcher for Pi full-system backup & installer via file2.sh
+# 🚀 Smart launcher for full Pi backup + Steam installer (calls file2.sh)
 
 set -e
 
-REPO_OWNER="Greenisus1"
-REPO_NAME="microsoftcopilotcodeusedonpi"
-SCRIPT_NAME="file2.sh"
-GITHUB_URL="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/main/$SCRIPT_NAME"
-LOCAL_TEMP="/tmp/$SCRIPT_NAME"
+# === Dog1 Banner + Hidden Easter Egg ===
+cat << "DOG"
+            █   ████████     ███    ██     █         █   █████████     
+        █████   █      █    █       █      ███████████      ███          
+        █   █   █      █    █  █    █      ███████████      ███                                                                                       
+        █████   ████████    ████  █████    █         █  ███████████
+DOG
+echo -e "\e[30mHI\e[0m"  # Hidden "HI" in black
+
+# === Repo Info ===
+REPO_OWNER="Greenisus1" # === change if you fork it===
+REPO_NAME="microsoftcopilotcodeusedonpi" # === change if you fork it===
+SCRIPT_NAME="file2.sh" # === change if you fork it===
+GITHUB_URL="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/main/$SCRIPT_NAME" # === change if you fork it===
+LOCAL_TEMP="/tmp/$SCRIPT_NAME" # === change if you fork it===
 
 log() {
   echo -e "[$(date +'%H:%M:%S')] $1"
 }
 
-# Step 1: Check prerequisites
+# === Check prerequisites ===
 if ! command -v curl >/dev/null; then
   echo "❌ curl is required but not installed. Please install it first."
   exit 1
 fi
 
-if ! ping -q -c 1 github.com >/dev/null; then
+if ! ping -q -c 1 github.com >/dev/null 2>&1; then
   echo "❌ No internet connection or GitHub unreachable."
   exit 1
 fi
 
-# Step 2: Download file2.sh from GitHub
+# === Fetch file2.sh ===
 log "📥 Fetching latest $SCRIPT_NAME from GitHub..."
 if curl -fsSL "$GITHUB_URL" -o "$LOCAL_TEMP"; then
   chmod +x "$LOCAL_TEMP"
@@ -33,6 +43,6 @@ else
   exit 1
 fi
 
-# Step 3: Run it
-log "🚀 Running full installer..."
+# === Run file2.sh with inherited args ===
+log "🚀 Running full backup + installer..."
 bash "$LOCAL_TEMP" "$@"

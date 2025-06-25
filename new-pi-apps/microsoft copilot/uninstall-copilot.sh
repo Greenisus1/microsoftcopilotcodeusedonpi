@@ -1,0 +1,1 @@
+uninstall-copilot.sh

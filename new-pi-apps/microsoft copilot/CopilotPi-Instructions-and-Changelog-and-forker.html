@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CopilotPi - Instructions & Changelog</title>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      max-width: 800px;
+      margin: 2em auto;
+      padding: 1em;
+      line-height: 1.6;
+      background-color: #f8f9fa;
+      color: #222;
+    }
+    h1, h2 {
+      color: #005eb8;
+    }
+    code, pre {
+      background: #eee;
+      padding: 4px 6px;
+      border-radius: 4px;
+      font-family: Consolas, monospace;
+      overflow-x: auto;
+    }
+    .section {
+      margin-top: 2em;
+    }
+    .version {
+      background: #e1f3ff;
+      padding: 0.5em;
+      border-left: 4px solid #0078d4;
+      margin: 1em 0;
+    }
+    .note {
+      font-style: italic;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <h1>CopilotPi: Instructions & Changelog</h1>
+  <p>Created by <strong>Liam</strong> • Last updated: <em>June 2025</em></p>
+
+  <div class="section">
+    <h2>🚀 Installation Instructions</h2>
+    <ol>
+      <li>Open Terminal on your Raspberry Pi.</li>
+      <li>Run the following commands:
+        <pre><code>wget https://raw.githubusercontent.com/Greenisus1/microsoftcopilotcodeusedonpi/main/new-pi-apps/microsoft%20copilot/copilot-universal-installer.sh
+chmod +x copilot-universal-installer.sh
+./copilot-universal-installer.sh</code></pre>
+      </li>
+      <li>Follow the interactive prompts. Audio, microphone, Bluetooth, and Copilot Desktop will be handled automatically.</li>
+    </ol>
+  </div>
+
+  <div class="section">
+    <h2>🧹 Uninstallation</h2>
+    <p>To remove Copilot and related packages:</p>
+    <pre><code>wget https://raw.githubusercontent.com/Greenisus1/microsoftcopilotcodeusedonpi/main/uninstall-copilot.sh
+chmod +x uninstall-copilot.sh
+./uninstall-copilot.sh</code></pre>
+    <p class="note">Optional: You'll be prompted to remove audio and Bluetooth tools if you no longer need them.</p>
+  </div>
+
+  <div class="section">
+    <h2>🧠 What It Installs</h2>
+    <ul>
+      <li>Copilot Desktop (Snap-based wrapper)</li>
+      <li>ALSA & PulseAudio for mic and playback</li>
+      <li>Bluetooth stack via BlueZ and PulseAudio module</li>
+      <li>Desktop shortcut + taskbar integration</li>
+      <li>Zenity-based welcome dialog</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>🔧 Fork Maker Tool</h2>
+    <p>Use this interactive script to clone the repo and create your own fork like <code>allmystuff-fork-####</code>.</p>
+    <p>Requires <code>gh auth login</code> before use.</p>
+    <pre><code>#!/bin/bash
+
+# Colors
+green='\033[0;32m'
+cyan='\033[0;36m'
+reset='\033[0m'
+
+# Config
+SOURCE_REPO="https://github.com/Greenisus1/microsoftcopilotcodeusedonpi.git"
+PIN="copilot42"
+GITHUB_USER=$(gh api user --jq .login 2>/dev/null)
+RN=$((1000 + RANDOM % 9000))
+FORK_NAME="allmystuff-fork-$RN"
+
+echo -e "${cyan}🔐 Enter classic pin to continue:${reset}"
+read -rsp "PIN: " input
+echo
+
+if [[ "$input" != "$PIN" ]]; then
+    echo -e "${reset}❌ Incorrect PIN. Access denied."
+    exit 1
+fi
+
+if [[ -z "$GITHUB_USER" ]]; then
+    echo -e "${reset}⚠️ GitHub CLI not logged in. Run: gh auth login"
+    exit 1
+fi
+
+echo -e "${green}✅ PIN accepted. Forking to: $GITHUB_USER/$FORK_NAME...${reset}"
+
+# Clone and recreate under user's namespace
+git clone "$SOURCE_REPO" "$FORK_NAME"
+cd "$FORK_NAME" || exit
+gh repo create "$GITHUB_USER/$FORK_NAME" --public --source=. --push
+
+echo -e "${green}🎉 Fork completed! Repo: https://github.com/$GITHUB_USER/$FORK_NAME${reset}"</code></pre>
+  </div>
+
+  <div class="section">
+    <h2>📘 Changelog</h2>
+
+    <div class="version">
+      <strong>v1.0 — June 2025</strong>
+      <ul>
+        <li>Initial release: universal interactive installer with full hardware support</li>
+        <li>Includes uninstall script and optional cleanup</li>
+        <li>Desktop + taskbar icon generation</li>
+        <li>Added Fork Maker PIN-secured script</li>
+      </ul>
+    </div>
+
+    <div class="version">
+      <strong>v1.1 — Planned</strong>
+      <ul>
+        <li>Auto-update via GitHub</li>
+        <li>Optional GUI interface using YAD</li>
+        <li>Pi-Apps compatibility prototype</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="note">Want to contribute or fork? Visit <a href="https://github.com/Greenisus1/microsoftcopilotcodeusedonpi">the GitHub repo</a>.</p>
+</body>
+</html>

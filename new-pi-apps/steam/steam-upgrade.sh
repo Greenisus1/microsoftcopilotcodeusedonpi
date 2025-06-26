@@ -2,7 +2,7 @@
 # STEAMFIXER [BETA] - Motel Manager Simulator Launcher & System Utility
 
 # CONFIG
-GAME_APPID="1234560"  # Replace with actual App ID
+GAME_APPID="2594540"  # Replace with actual App ID
 REQUIRED_SPACE_MB=3000
 STEAM_CMD="steam steam://rungameid/$GAME_APPID"
 TEMP_OUTPUT="/tmp/steamfixer_output.txt"

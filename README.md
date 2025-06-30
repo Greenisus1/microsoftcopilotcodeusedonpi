@@ -14,7 +14,8 @@ bash:  chmod +x coolpi.sh
 /bash: sudo mv coolpi.sh /usr/local/bin/coolpi                          
 
 then just run "coolpi"                                   
-          to update coolpi run:  
-          then run:   sudo mv update-coolpi.sh /usr/local/bin/update-coolpi
-
+  to update coolpi run: wget -O ~/update-coolpi.sh \ https://raw.githubusercontent.com/Greenisus1/microsoftcopilotcodeusedonpi/main/update-coolpi.sh
+          then run: chmod +x ~/update-coolpi.sh
+          then run: sudo mv update-coolpi.sh /usr/local/bin/update-coolpi
+          to run run: update-coolpi
                                                                   

@@ -13,4 +13,8 @@ bash:  chmod +x coolpi.sh
 /                                 
 /bash: sudo mv coolpi.sh /usr/local/bin/coolpi                          
 
-then just run "coolpi"                     
+then just run "coolpi"                                   
+          to update coolpi run:  
+          then run:   sudo mv update-coolpi.sh /usr/local/bin/update-coolpi
+
+                                                                  

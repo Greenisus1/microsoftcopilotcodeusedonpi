@@ -1,117 +1,124 @@
 #!/bin/bash
-# === CoolPi v2.1 - Self-Updating Terminal UI ===
+# coolpi.sh — CoolPi v2.1 all-in-one launcher
 
-REPO_URL="https://raw.githubusercontent.com/Greenisus1/microsoftcopilotcodeusedonpi/main/coolpi.sh"
-LOCAL_FILE="$0"
-TMP="/tmp/coolpi_menu.txt"
-START_DIR="$HOME"
-APP_DIR="$HOME/coolpi/done-downloads"
-mkdir -p "$APP_DIR"
-
-# === Auto-Updater ===
-curl -s "$REPO_URL" -o /tmp/coolpi_latest.sh
-if [ -s /tmp/coolpi_latest.sh ]; then
-  LOCAL_HASH=$(sha256sum "$LOCAL_FILE" | awk '{print $1}')
-  REMOTE_HASH=$(sha256sum /tmp/coolpi_latest.sh | awk '{print $1}')
-  if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
-    cp /tmp/coolpi_latest.sh "$LOCAL_FILE"
-    chmod +x "$LOCAL_FILE"
-    exec "$LOCAL_FILE"
+#### 1) Self-update in place
+REPO="https://raw.githubusercontent.com/Greenisus1/microsoftcopilotcodeusedonpi/main/coolpi.sh"
+ME="$0"
+TMP_UP="/tmp/coolpi_latest.sh"
+if command -v curl >/dev/null; then
+  curl -s "$REPO" -o "$TMP_UP"
+  if [ -s "$TMP_UP" ]; then
+    H1=$(sha256sum "$ME"   | cut -d' ' -f1)
+    H2=$(sha256sum "$TMP_UP"| cut -d' ' -f1)
+    if [ "$H1" != "$H2" ]; then
+      mv "$TMP_UP" "$ME"
+      chmod +x "$ME"
+      exec "$ME" "$@"
+    fi
   fi
 fi
 
-# === Dependencies ===
-for cmd in dialog curl jq base64 sha256sum; do
-  command -v "$cmd" &>/dev/null || sudo apt install -y "$cmd"
+#### 2) Ensure deps
+DEPS=(dialog curl jq base64 sha256sum)
+for cmd in "${DEPS[@]}"; do
+  if ! command -v "$cmd" >/dev/null; then
+    sudo apt update
+    sudo apt install -y "$cmd"
+  fi
 done
 
-# === Banner ===
-show_banner() {
+#### 3) Globals
+TMP="/tmp/coolpi_menu.txt"
+APP_DIR="$HOME/coolpi/done-downloads"
+GITHUB_API="https://api.github.com"
+mkdir -p "$APP_DIR"
+
+#### 4) Banner
+show_banner(){
   clear
-  echo "=============================="
-  echo "         COOLPI v2.1"
-  echo "=============================="
-  echo " File Manager · App Store · Tools"
-  echo "=============================="
+  cat <<'EOF'
+================================
+          COOLPI v2.1
+ File Manager · App Store · UI
+================================
+EOF
   sleep 1
 }
 
-# === Storage Meter ===
-show_storage() {
-  usage=$(df / | awk 'NR==2 {print $3}')
-  total=$(df / | awk 'NR==2 {print $2}')
-  free=$(df / | awk 'NR==2 {print $4}')
-  percent=$(df -h / | awk 'NR==2 {print $5}')
-  used_blocks=$(( usage * 30 / total ))
-  free_blocks=$(( free * 30 / total ))
-  sys_blocks=$(( 30 - used_blocks - free_blocks ))
+#### 5) Storage meter
+show_storage(){
+  mapfile -t D < <(df --output=source,size,used,avail,pcent / | tail -1)
+  used=${D[2]}; tot=${D[1]}; free=${D[3]}; pct=${D[4]}
+  # convert to blocks
+  ub=$(( used*30/tot )); fb=$(( free*30/tot ))
+  sb=$(( 30-ub-fb ))
   bar=""
-  for ((i=0;i<used_blocks;i++)); do bar+="\Z1█"; done
-  for ((i=0;i<sys_blocks;i++));  do bar+="\Z3█"; done
-  for ((i=0;i<free_blocks;i++)); do bar+="\Z2█"; done
+  for i in $(seq 1 $ub); do bar+="\Z1█"; done
+  for i in $(seq 1 $sb); do bar+="\Z3█"; done
+  for i in $(seq 1 $fb); do bar+="\Z2█"; done
   dialog --colors --title "Storage" --msgbox \
-  "\n/ Usage: $percent\n\n$bar\n\n\Z1Used\Z0 | \Z3System\Z0 | \Z2Free\Z0" 12 60
+"\nFilesystem: /\n\n$bar\n\n\Z1Used\Z0 | \Z3System\Z0 | \Z2Free\Z0\n$ pct" 12 60
 }
 
-# === File Actions ===
-delete_file() {
-  file="$1"
-  dialog --yesno "Delete:\n$file" 8 50 && rm -f "$file"
+#### 6) File actions
+delete_file(){
+  dialog --yesno "Delete this file?\n\n$1" 7 50 && rm -f "$1"
 }
-
-run_file() {
-  file="$1"; ext="${file##*.}"
+run_file(){
+  ext="${1##*.}"
   case "$ext" in
-    py) cmd=python3 ;;
-    sh) cmd=bash ;;
-    js) cmd=node ;;
-    rb) cmd=ruby ;;
-    pl) cmd=perl ;;
-    *) dialog --msgbox "Unsupported: .$ext" 6 40; return ;;
+    py) i=python3;;
+    sh) i=bash;;
+    js) i=node;;
+    rb) i=ruby;;
+    pl) i=perl;;
+    *) dialog --msgbox "No handler for .$ext" 6 40; return;;
   esac
-  command -v "$cmd" &>/dev/null || sudo apt install -y "$cmd"
-  output=$("$cmd" "$file" 2>&1)
-  dialog --title "Output" --msgbox "$output" 20 70
+  command -v $i >/dev/null || sudo apt install -y $i
+  out=$($i "$1" 2>&1)
+  dialog --title "Output" --msgbox "$out" 20 70
 }
-
-github_publish() {
-  file="$1"
-  dialog --inputbox "GitHub Token:" 8 50 2>"$TMP"; token=$(<"$TMP")
-  dialog --inputbox "Repo (user/repo):" 8 50 2>"$TMP"; repo=$(<"$TMP")
-  fname=$(basename "$file")
-  content=$(base64 < "$file")
-  json=$(jq -n --arg msg "Add $fname" --arg c "$content" '{message:$msg, content:$c}')
+github_publish(){
+  dialog --inputbox "GitHub Token:" 8 60 2>"$TMP"; token=$(<"$TMP")
+  dialog --inputbox "Repo (user/repo):" 8 60 2>"$TMP"; repo=$(<"$TMP")
+  name=$(basename "$1"); b64=$(base64 < "$1")
+  payload=$(jq -nc --arg m "Add $name" --arg c "$b64" '{message:$m,content:$c}')
   http=$(curl -s -o /dev/null -w "%{http_code}" \
     -X PUT -H "Authorization: token $token" \
-    -H "Content-Type: application/json" -d "$json" \
-    "https://api.github.com/repos/$repo/contents/$fname")
-  [[ "$http" =~ 20. ]] && dialog --msgbox "Uploaded to $repo" 6 40 || dialog --msgbox "HTTP $http error" 6 40
+    -H "Content-Type: application/json" \
+    -d "$payload" \
+    "$GITHUB_API/repos/$repo/contents/$name")
+  if [[ "$http" =~ ^20 ]]; then
+    dialog --msgbox "Uploaded to $repo" 6 50
+  else
+    dialog --msgbox "GitHub Error: $http" 6 50
+  fi
 }
-
-file_action() {
-  file="$1"
-  dialog --menu "File: $(basename "$file")" 12 50 4 \
-    1 "Run File" 2 "Publish to GitHub" 3 "Delete File" 4 "Back" 2>"$TMP"
+file_action(){
+  dialog --menu "File: $(basename "$1")" 12 60 4 \
+    1 "Run" \
+    2 "Publish to GitHub" \
+    3 "Delete" \
+    4 "Back" 2>"$TMP"
   case $(<"$TMP") in
-    1) run_file "$file" ;;
-    2) github_publish "$file" ;;
-    3) delete_file "$file" ;;
-    *) return ;;
+    1) run_file "$1";;
+    2) github_publish "$1";;
+    3) delete_file "$1";;
   esac
 }
-
-browse() {
+browse(){
   dir="$1"
   while true; do
     mapfile -t items < <(find "$dir" -maxdepth 1 -mindepth 1 | sort)
     menu=()
-    for e in "${items[@]}"; do
-      name=$(basename "$e")
-      [[ -d "$e" ]] && name="[DIR] $name"
-      menu+=("$e" "$name")
+    for p in "${items[@]}"; do
+      n=$(basename "$p")
+      [[ -d $p ]] && n="[DIR] $n"
+      menu+=("$p" "$n")
     done
-    menu+=("..BACK.." "Return")
-    dialog --title "Browsing $dir" --menu "Choose file/folder:" 20 60 12 "${menu[@]}" 2>"$TMP" || break
+    menu+=("..BACK.." "Return Home")
+    dialog --title "Browse: $dir" \
+      --menu "Select" 20 70 12 "${menu[@]}" 2>"$TMP" || break
     sel=$(<"$TMP")
     [[ "$sel" == "..BACK.." ]] && break
     [[ -d "$sel" ]] && { dir="$sel"; continue; }
@@ -119,76 +126,98 @@ browse() {
   done
 }
 
-# === App Store ===
-install_app() {
-  name="$1"; url="$2"; file="$APP_DIR/$(basename "$url")"
-  curl -s "$url" -o "$file" && chmod +x "$file"
-  dialog --msgbox "$name installed to $file" 6 50
+#### 7) App Store
+install_app(){
+  curl -s "$2" -o "$APP_DIR/$(basename "$2")"
+  chmod +x "$APP_DIR/$(basename "$2")"
+  dialog --msgbox "$1 installed." 6 50
 }
-
-uninstall_app() {
-  file="$1"
-  dialog --yesno "Uninstall $(basename "$file")?" 6 40 && rm -f "$file"
+uninstall_app(){
+  dialog --yesno "Uninstall $1?" 6 50 && rm -f "$1"
 }
-
-app_store_category() {
-  cat="$1"
-  case "$cat" in
+app_store_category(){
+  case "$1" in
     Games)
-      apps=("Steam Upgrade" "https://raw.githubusercontent.com/Greenisus1/microsoftcopilotcodeusedonpi/main/new-pi-apps/steam/steam-upgrade.sh")
+      names=("Steam Upgrade")
+      urls=("https://raw.githubusercontent.com/Greenisus1/microsoftcopilotcodeusedonpi/main/new-pi-apps/steam/steam-upgrade.sh")
       ;;
-    System)
-      apps=("Add to Store" "https://raw.githubusercontent.com/Greenisus1/microsoftcopilotcodeusedonpi/main/new-pi-apps/microsoft%20copilot/addtostore.sh")
+    "System Utilities")
+      names=("Add to Store")
+      urls=("https://raw.githubusercontent.com/Greenisus1/microsoftcopilotcodeusedonpi/main/new-pi-apps/microsoft%20copilot/addtostore.sh")
       ;;
   esac
-
   menu=()
-  for ((i=0; i<${#apps[@]}; i+=2)); do
-    name="${apps[i]}"
-    url="${apps[i+1]}"
-    fname="$APP_DIR/$(basename "$url")"
-    [[ -f "$fname" ]] && status="Installed" || status="Install"
-    menu+=("$name" "$status")
+  for i in "${!names[@]}"; do
+    f="$APP_DIR/$(basename "${urls[i]}")"
+    s=$([[ -f $f ]] && echo "Installed" || echo "Install")
+    menu+=("${names[i]}" "$s")
   done
-
-  dialog --menu "$cat Apps" 15 60 6 "${menu[@]}" 2>"$TMP" || return
+  dialog --menu "$1 Apps" 15 60 6 "${menu[@]}" 2>"$TMP" || return
   sel=$(<"$TMP")
-
-  for ((i=0; i<${#apps[@]}; i+=2)); do
-    if [[ "${apps[i]}" == "$sel" ]]; then
-      url="${apps[i+1]}"
-      fname="$APP_DIR/$(basename "$url")"
-      if [[ -f "$fname" ]]; then
-        uninstall_app "$fname"
-      else
-        install_app "$sel" "$url"
-      fi
+  for i in "${!names[@]}"; do
+    if [[ "${names[i]}" == "$sel" ]]; then
+      f="$APP_DIR/$(basename "${urls[i]}")"
+      [[ -f $f ]] && uninstall_app "$f" || install_app "$sel" "${urls[i]}"
     fi
   done
 }
-
-app_store() {
-  dialog --menu "CoolPi App Store" 12 50 3 \
+app_store(){
+  dialog --menu "CoolPi App Store" 12 60 4 \
     1 "Games" \
     2 "System Utilities" \
     3 "Back" 2>"$TMP"
   case $(<"$TMP") in
-    1) app_store_category "Games" ;;
-    2) app_store_category "System" ;;
-    *) return ;;
+    1) app_store_category "Games";;
+    2) app_store_category "System Utilities";;
   esac
 }
 
-# === App Launcher ===
-launch_apps() {
-  mapfile -t apps < <(find /usr/share/applications ~/.local/share/applications -name '*.desktop' 2>/dev/null)
+#### 8) App Launcher
+launch_apps(){
+  mapfile -t d < <(find /usr/share/applications ~/.local/share/applications -name '*.desktop' 2>/dev/null)
   menu=()
-  for f in "${apps[@]}"; do
-    name=$(grep -m1 "^Name=" "$f" | cut -d= -f2)
-    exec=$(grep -m1 "^Exec=" "$f" | cut -d= -f2 | cut -d' ' -f1)
-    [[ $name && $exec ]] && menu+=("$exec" "$name")
+  for f in "${d[@]}"; do
+    name=$(grep -m1 '^Name=' "$f" | cut -d= -f2)
+    exe=$(grep -m1 '^Exec=' "$f" | cut -d= -f2 | awk '{print $1}')
+    [[ $name && $exe ]] && menu+=("$exe" "$name")
   done
-  dialog --title "Apps" --menu "Launch one:" 20 60 12 "${menu[@]}" 2>"$TMP" || return
-  app=$(<"$TMP"); "$app" &
+  dialog --menu "Launch App" 20 60 12 "${menu[@]}" 2>"$TMP" || return
+  cmd=$(<"$TMP"); "$cmd" &
 }
 
+#### 9) System utilities
+system_utils(){
+  dialog --menu "System Tools" 12 50 4 \
+    1 "Reboot" \
+    2 "Shutdown" \
+    3 "Storage" \
+    4 "Back" 2>"$TMP"
+  case $(<"$TMP") in
+    1) sudo reboot;;
+    2) sudo shutdown now;;
+    3) show_storage;;
+  esac
+}
+
+#### 10) Main menu
+main_menu(){
+  while true; do
+    dialog --title "CoolPi Home" --menu "Choose:" 15 60 6 \
+      1 "Browse Files" \
+      2 "Launch Apps" \
+      3 "System Utilities" \
+      4 "App Store" \
+      5 "Exit" 2>"$TMP"
+    case $(<"$TMP") in
+      1) browse "$HOME";;
+      2) launch_apps;;
+      3) system_utils;;
+      4) app_store;;
+      5) clear; exit 0;;
+    esac
+  done
+}
+
+# Launch
+show_banner
+main_menu

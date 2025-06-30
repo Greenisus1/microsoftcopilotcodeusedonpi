@@ -1,6 +1,47 @@
 #!/bin/bash
-# CoolPi v2.0 - File Manager, App Launcher, and Utilities
+# === CoolPi Auto-Updater ===
 
+REPO_URL="https://raw.githubusercontent.com/Greenisus1/microsoftcopilotcodeusedonpi/main/coolpi.sh"
+LOCAL_FILE="$0"
+TMP_NEW="/tmp/coolpi_latest.sh"
+SKIP_FLAG="/tmp/coolpi_skip_update"
+
+# Loop-breaker: Press 'e' 3 times to skip update check
+if [ -f "$SKIP_FLAG" ]; then
+  COUNT=$(cat "$SKIP_FLAG")
+else
+  COUNT=0
+fi
+
+read -t 1 -n 1 key
+if [ "$key" = "e" ]; then
+  COUNT=$((COUNT + 1))
+  echo "$COUNT" > "$SKIP_FLAG"
+else
+  echo 0 > "$SKIP_FLAG"
+fi
+
+if [ "$COUNT" -ge 3 ]; then
+  echo "🚧 Skipping update check (manual override)"
+  echo 0 > "$SKIP_FLAG"
+  sleep 1
+else
+  curl -s "$REPO_URL" -o "$TMP_NEW"
+  if [ -f "$TMP_NEW" ]; then
+    LOCAL_HASH=$(sha256sum "$LOCAL_FILE" | awk '{print $1}')
+    REMOTE_HASH=$(sha256sum "$TMP_NEW" | awk '{print $1}')
+    if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
+      echo "🔄 Update found! Launching updated version..."
+      chmod +x "$TMP_NEW"
+      gnome-terminal -- bash -c "$TMP_NEW; exec bash" 2>/dev/null || \
+      lxterminal -e "$TMP_NEW" 2>/dev/null || \
+      x-terminal-emulator -e "$TMP_NEW" 2>/dev/null || \
+      (echo "❌ Could not auto-launch updated version. Run manually: $TMP_NEW")
+      exit 0
+    fi
+  fi
+fi
+# CoolPi v2.0 - File Manager, App Launcher, and Utilities
 TMP="/tmp/coolpi_menu.txt"
 START_DIR="$HOME"
 GITHUB_API="https://api.github.com"

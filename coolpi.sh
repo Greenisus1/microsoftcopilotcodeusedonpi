@@ -2,7 +2,7 @@
 # === CoolPi Auto-Updater ===
 REPO_URL="https://raw.githubusercontent.com/Greenisus1/microsoftcopilotcodeusedonpi/main/coolpi.sh"
 LOCAL_FILE="$0"
-TMP_NEW="/tmp/coolpi_latest.sh"
+TMP_NEW="/tmp/coolpi.sh"
 SKIP_FLAG="/tmp/coolpi_skip_update"
 
 # Failsafe override: press 'e' 3 times to skip update

@@ -255,8 +255,8 @@ EOF
                                 break
                             else
                                 echo "Error: File could not be deleted."
-                            }
-                        fi
+                            fi
+                        
                         ;;
                     0)
                         # Cancel file action

@@ -257,7 +257,7 @@ EOF
                                 echo "Error: File could not be deleted."
                             fi
                         
-                        ;;
+                        
                     0)
                         # Cancel file action
                         ;;

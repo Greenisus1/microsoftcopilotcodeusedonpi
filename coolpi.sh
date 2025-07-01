@@ -9,18 +9,13 @@
 # session when launching GUI apps.
 
 # --- Configuration and Global Variables ---
-SCRIPT_URL="https://your-repo-or-url/coolpi.sh"  # URL to fetch latest script version for self-update
+SCRIPT_URL="https://raw.githubusercontent.com/Greenisus1/microsoftcopilotcodeusedonpi/main/coolpi.sh"  # URL to fetch latest script version for self-update
 SCRIPT_PATH="$(realpath "$0")"
 VERSION="1.0.0"  # Script version
 
-# Colors for output (optional, using plain text for simplicity)
-# e.g., GREEN='\e[32m'; RED='\e[31m'; NC='\e[0m'
-
 # --- Self-Update Function ---
 update_script() {
-    # This function checks for a newer version of this script and updates it if available.
     echo "Checking for script updates..."
-    # Fetch the latest script from the defined URL
     if command -v curl >/dev/null 2>&1; then
         curl -sfL "$SCRIPT_URL" -o /tmp/coolpi_update.sh
     else
@@ -32,21 +27,16 @@ update_script() {
         rm -f /tmp/coolpi_update.sh
         return 1
     fi
-    # Optionally compare version numbers (not implemented; always update if file is fetched)
-    # You could source /tmp/coolpi_update.sh and compare VERSION variables if maintained.
     echo "Update found! Applying update..."
-    # Replace current script file with the new one
     cp -f /tmp/coolpi_update.sh "$SCRIPT_PATH" && chmod +x "$SCRIPT_PATH"
     rm -f /tmp/coolpi_update.sh
     echo "CoolPi script has been updated. Restarting..."
-    exec "$SCRIPT_PATH" "$@"   # Re-run the script with same arguments (if any)
+    exec "$SCRIPT_PATH" "$@"
 }
 
 # --- Symlink Setup Function ---
 ensure_symlink() {
-    # Create or update symlink /usr/local/bin/update-coolpi pointing to this script for quick updates
     local link="/usr/local/bin/update-coolpi"
-    # Only attempt if we have write permission or using sudo
     if [ "$(readlink -f "$link")" != "$SCRIPT_PATH" ]; then
         sudo ln -sf "$SCRIPT_PATH" "$link" >/dev/null 2>&1 || return 0
     fi
@@ -54,13 +44,10 @@ ensure_symlink() {
 
 # --- System Utilities Functions ---
 show_storage_info() {
-    # Display detailed storage usage and a visual meter for root filesystem
     echo "Storage Usage:"
-    df -h /                    # show human-readable usage for root (/)
-    # Calculate visual meter for root filesystem usage
+    df -h /
     local used_pct=$(df -P / | awk 'NR==2 {print $5}' | sed 's/%//')
     local size=$(df -h / | awk 'NR==2 {print $2}')
-    # Build usage bar (20 blocks)
     local blocks=$((used_pct/5))
     ((blocks > 20)) && blocks=20
     local bar=""
@@ -71,13 +58,11 @@ show_storage_info() {
 }
 
 open_shell() {
-    # Opens an interactive shell. User can type 'exit' to return.
     echo "Opening an interactive shell. Type 'exit' to return to CoolPi."
     bash
 }
 
 system_menu() {
-    # System utilities submenu for reboot, shutdown, etc.
     local choice
     while true; do
         echo ""
@@ -90,15 +75,15 @@ system_menu() {
         echo "0) Back to Main Menu"
         read -rp "Choose an option: " choice
         case "$choice" in
-            1)  # Reboot
+            1)
                 read -rp "Are you sure you want to reboot? [y/N]: " confirm
                 if [[ "$confirm" =~ ^[Yy] ]]; then
                     echo "Rebooting now..."
                     sudo reboot
-                    exit 0  # in case reboot command fails, exit script
+                    exit 0
                 fi
                 ;;
-            2)  # Shutdown
+            2)
                 read -rp "Are you sure you want to shutdown? [y/N]: " confirm
                 if [[ "$confirm" =~ ^[Yy] ]]; then
                     echo "Shutting down now..."
@@ -106,23 +91,21 @@ system_menu() {
                     exit 0
                 fi
                 ;;
-            3)  # Storage view
+            3)
                 show_storage_info
                 read -rp "Press Enter to return to menu..." dummy
                 ;;
-            4)  # Embedded shell
+            4)
                 open_shell
-                # When user exits shell, continue
                 ;;
-            5)  # Run raspi-config (requires sudo)
+            5)
                 sudo raspi-config
                 echo "Exited raspi-config. Returning to menu..."
                 ;;
-            0) 
-                # Back to main menu
+            0)
                 break
                 ;;
-            *) 
+            *)
                 echo "Invalid selection. Please enter a number from the menu."
                 ;;
         esac
@@ -131,55 +114,43 @@ system_menu() {
 
 # --- File Manager Function ---
 file_manager() {
-    # Basic file navigation and file operations (run, publish, delete).
     local start_dir="$PWD"
     local choice file selection
     while true; do
         echo ""
         echo "==== File Manager (current directory: $PWD) ===="
-        # List directories and files in current directory
         local entries=()
-        # If not at root, provide parent directory option
         if [ "$PWD" != "/" ]; then
-            entries+=("..") 
+            entries+=("..")
         fi
-        # Gather directory contents (excluding . and ..)
         local item
         while IFS= read -r item; do
             entries+=("$item")
-        done < <(ls -A)  # List all except . and .. (sorted alphabetically by default)
-        # Print numbered list
+        done < <(ls -A)
         local idx=1
         for item in "${entries[@]}"; do
-            # Mark directories with a slash for clarity
             [ -d "$item" ] && printf "%2d) %s/\n" "$idx" "$item" || printf "%2d) %s\n" "$idx" "$item"
             idx=$((idx+1))
         done
         echo " 0) Back to Main Menu"
-        # Read user choice
         read -rp "Choose a file or directory: " choice
         if [[ "$choice" == "0" ]]; then
-            # Exit file manager
             break
         fi
-        # Validate choice is a number in range
         if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#entries[@]}" ]; then
             echo "Invalid selection."
             continue
         fi
         selection="${entries[$((choice-1))]}"
         if [ "$selection" == ".." ]; then
-            # Go up to parent directory
             cd .. || echo "Unable to go to parent directory."
             continue
         fi
         if [ -d "$selection" ]; then
-            # Enter the selected directory
             cd "$selection" || echo "Cannot enter directory: $selection"
             continue
         fi
         if [ -f "$selection" ]; then
-            # File selected - show file operations menu
             while true; do
                 echo ""
                 echo "File: $selection"
@@ -189,17 +160,15 @@ file_manager() {
                 echo "0) Cancel (back to list)"
                 read -rp "Choose an action for '$selection': " file
                 case "$file" in
-                    1)  # Run or open the file
+                    1)
                         echo "Running '$selection'..."
                         if [ -x "$selection" ]; then
-                            # Executable file
                             "./$selection"
                         elif [[ "$selection" == *.sh ]]; then
                             bash "$selection"
                         elif [[ "$selection" == *.py ]]; then
                             python3 "$selection"
                         else
-                            # Try to open with xdg-open if available (for images, etc.)
                             if [ -n "$DISPLAY" ] && command -v xdg-open >/dev/null 2>&1; then
                                 xdg-open "$selection" >/dev/null 2>&1 &
                             else
@@ -209,12 +178,11 @@ file_manager() {
                         echo "--- End of file output ---"
                         read -rp "Press Enter to continue..." dummy
                         ;;
-                    2)  # Publish to GitHub Gist
+                    2)
                         if ! command -v curl >/dev/null 2>&1; then
                             echo "Error: curl is required to publish to GitHub."
                         else
                             echo "Publishing '$selection' to GitHub Gist..."
-                            # Read file content and escape it for JSON
                             CONTENT=$(sed -e 's/\r//g' -e 's/\t/\\t/g' -e 's/\"/\\"/g' "$selection" | awk '{printf "%s\\n", $0}')
                             read -rp "Make gist public? [Y/n]: " pubchoice
                             if [[ "$pubchoice" =~ ^[Nn] ]]; then
@@ -222,7 +190,6 @@ file_manager() {
                             else
                                 pub_flag="true"
                             fi
-                            # Create JSON payload
                             read -r -d '' JSON_DATA <<EOF
 {
   "description": "Uploaded via CoolPi",
@@ -234,48 +201,41 @@ file_manager() {
   }
 }
 EOF
-# Send POST request to GitHub Gist API
-response=$(curl -s -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "https://api.github.com/gists")
-gist_url=$(echo "$response" | grep -oE '"html_url": *"[^"]*"' | head -1 | sed -E 's/.*"html_url": *"([^"]*)".*/\1/')
-if [[ -n "$gist_url" ]]; then
-    echo "File published! Gist URL: $gist_url"
-else
-    echo "Failed to create gist. Response: $response"
-fi
-read -rp "Press Enter to continue..." dummy
-;;
-3)  # Delete file
-    read -rp "Are you sure you want to delete '$selection'? [y/N]: " confirm
-    if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        rm -f -- "$selection"
-        if [ ! -e "$selection" ]; then
-            echo "File deleted."
-            # After deletion, break out to refresh listing
-            break
-        else
-            echo "Error: File could not be deleted."
-        fi
-    fi
-    ;;
-
+                            response=$(curl -s -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "https://api.github.com/gists")
+                            gist_url=$(echo "$response" | grep -oE '"html_url": *"[^"]*"' | head -1 | sed -E 's/.*"html_url": *"([^"]*)".*/\1/')
+                            if [[ -n "$gist_url" ]]; then
+                                echo "File published! Gist URL: $gist_url"
+                            else
+                                echo "Failed to create gist. Response: $response"
+                            fi
+                            read -rp "Press Enter to continue..." dummy
+                        fi
+                        ;;
+                    3)
+                        read -rp "Are you sure you want to delete '$selection'? [y/N]: " confirm
+                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                            rm -f -- "$selection"
+                            if [ ! -e "$selection" ]; then
+                                echo "File deleted."
+                                break
+                            else
+                                echo "Error: File could not be deleted."
+                            fi
                         fi
                         ;;
                     0)
-                        # Cancel file action
                         ;;
                     *)
                         echo "Invalid option."
                         ;;
                 esac
-                # If we broke out (file deletion or cancel), exit file action loop
-                if [[ "$file" == "0" || "$file" == "3" && ! -e "$selection" ]]; then
+                if [[ "$file" == "0" || ( "$file" == "3" && ! -e "$selection" ) ]]; then
                     break
                 fi
             done
         fi
-        # Continue back to file list loop (refresh current directory listing)
     done
-    cd "$start_dir" || true   # return to original directory
+    cd "$start_dir" || true
 }
 
 # --- App Store Functions ---
@@ -303,16 +263,14 @@ app_store() {
         echo "0) Back to Main Menu"
         read -rp "Choose a category: " category_choice
         case "$category_choice" in
-            1)  # Games
+            1)
                 while true; do
                     echo ""
                     echo "*** Games ***"
-                    # Define games and their package names
                     local games=("ninvaders" "supertux")
                     local game_names=("nInvaders" "SuperTux")
                     for i in "${!games[@]}"; do
                         local pkg="${games[$i]}"
-                        # Check if installed
                         if dpkg -s "$pkg" >/dev/null 2>&1; then
                             echo "$(($i+1))) ${game_names[$i]} (Installed)"
                         else
@@ -335,7 +293,7 @@ app_store() {
                     fi
                 done
                 ;;
-            2)  # System Utilities
+            2)
                 while true; do
                     echo ""
                     echo "*** System Utilities ***"
@@ -365,7 +323,7 @@ app_store() {
                     fi
                 done
                 ;;
-            3)  # Productivity
+            3)
                 while true; do
                     echo ""
                     echo "*** Productivity ***"
@@ -395,7 +353,7 @@ app_store() {
                     fi
                 done
                 ;;
-            4)  # Development
+            4)
                 while true; do
                     echo ""
                     echo "*** Development ***"
@@ -439,16 +397,12 @@ app_store() {
 app_launcher() {
     echo ""
     echo "==== App Launcher (GUI Applications) ===="
-    # Warn if not in GUI environment
     if [ -z "$DISPLAY" ]; then
         echo "Warning: No DISPLAY detected. You might not be in a GUI session."
     fi
-    # Build list of GUI apps from .desktop files
-    local apps=() app_names=() app_execs=()
+    local apps=() app_execs=()
     while IFS= read -r desktop_file; do
-        # Skip if not a regular file
         [ -f "$desktop_file" ] || continue
-        # Extract application name and exec command from .desktop file
         local name exec
         name=$(grep -m1 '^Name=' "$desktop_file" | sed 's/^Name=//')
         exec=$(grep -m1 '^Exec=' "$desktop_file" | sed 's/^Exec=//' | cut -d' ' -f1)
@@ -464,8 +418,6 @@ app_launcher() {
     fi
     local choice
     while true; do
-        # Display applications list
-        local i
         for i in "${!apps[@]}"; do
             printf "%2d) %s\n" $((i+1)) "${apps[$i]}"
         done
@@ -479,7 +431,6 @@ app_launcher() {
             local app_name="${apps[$index]}"
             local app_exec="${app_execs[$index]}"
             echo "Launching $app_name..."
-            # Launch the application (background & disown to detach from terminal)
             nohup "$app_exec" >/dev/null 2>&1 &
             disown
             echo "$app_name launched (if GUI, check your desktop)."
@@ -491,21 +442,16 @@ app_launcher() {
 }
 
 # --- Main Program Loop ---
-# If script is called via symlink "update-coolpi", perform update only
 if [[ "$(basename "$0")" == "update-coolpi" ]]; then
     update_script
     exit 0
 fi
 
-# Ensure the update symlink is in place (attempt silently)
 ensure_symlink
 
-# If run without arguments, automatically check for updates on start
 update_script  # you can comment this out to disable auto-update on each run
 
-# Main menu loop
 while true; do
-    # Display main menu and storage meter
     echo ""
     echo "===== CoolPi Main Menu ====="
     echo "1) System Utilities"
@@ -514,7 +460,6 @@ while true; do
     echo "4) App Launcher"
     echo "5) Update CoolPi Script"
     echo "0) Exit"
-    # Show storage usage bar for root filesystem
     used_pct=$(df -P / | awk 'NR==2 {print $5}' | sed 's/%//')
     blocks=$((used_pct/5)); ((blocks > 20)) && blocks=20
     bar=""
@@ -523,19 +468,16 @@ while true; do
     done
     total_size=$(df -h / | awk 'NR==2 {print $2}')
     printf "Disk Usage: [%s] %d%% of %s used\n" "$bar" "$used_pct" "$total_size"
-    # Read main menu choice
     read -rp "Select an option: " REPLY
     case "$REPLY" in
         1) system_menu ;;
         2) file_manager ;;
         3) app_store ;;
         4) app_launcher ;;
-        5) 
-            update_script 
-            # If update_script returns, it means no update was done or it failed.
-            # In case of update, exec will have restarted the script.
+        5)
+            update_script
             ;;
-        0) 
+        0)
             echo "Goodbye!"
             exit 0
             ;;

@@ -234,28 +234,30 @@ file_manager() {
   }
 }
 EOF
-                            # Send POST request to GitHub Gist API
-                            response=$(curl -s -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "https://api.github.com/gists")
-                            gist_url=$(echo "$response" | grep -oE '"html_url": *"[^"]*"' | head -1 | sed -E 's/.*"html_url": *"([^"]*)".*/\1/')
-                            if [[ -n "$gist_url" ]]; then
-                                echo "File published! Gist URL: $gist_url"
-                            else
-                                echo "Failed to create gist. Response: $response"
-                            fi
-                        fi
-                        read -rp "Press Enter to continue..." dummy
-                        ;;
-                    3)  # Delete file
-                        read -rp "Are you sure you want to delete '$selection'? [y/N]: " confirm
-                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                            rm -f -- "$selection"
-                            if [ ! -e "$selection" ]; then
-                                echo "File deleted."
-                                # After deletion, break out to refresh listing
-                                break
-                            else
-                                echo "Error: File could not be deleted."
-                            }
+# Send POST request to GitHub Gist API
+response=$(curl -s -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "https://api.github.com/gists")
+gist_url=$(echo "$response" | grep -oE '"html_url": *"[^"]*"' | head -1 | sed -E 's/.*"html_url": *"([^"]*)".*/\1/')
+if [[ -n "$gist_url" ]]; then
+    echo "File published! Gist URL: $gist_url"
+else
+    echo "Failed to create gist. Response: $response"
+fi
+read -rp "Press Enter to continue..." dummy
+;;
+3)  # Delete file
+    read -rp "Are you sure you want to delete '$selection'? [y/N]: " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        rm -f -- "$selection"
+        if [ ! -e "$selection" ]; then
+            echo "File deleted."
+            # After deletion, break out to refresh listing
+            break
+        else
+            echo "Error: File could not be deleted."
+        fi
+    fi
+    ;;
+
                         fi
                         ;;
                     0)

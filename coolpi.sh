@@ -6,7 +6,7 @@
 # 
 # Note: Run this script in a terminal. For full functionality, ensure you have an 
 # internet connection (for updates and GitHub publishing) and are in a graphical 
-# session when launching GUI apps.
+# session when launching GUI app
 
 # --- Configuration and Global Variables ---
 SCRIPT_URL="https://your-repo-or-url/coolpi.sh"  # URL to fetch latest script version for self-update

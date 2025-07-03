@@ -1,36 +1,37 @@
 #!/bin/bash
+# ----------------------------------------------------------------------------
+# Liam’s Pi-Connect Guardian
+# A single script for Pi: power tools, Wi-Fi connect, hotspot cloning & monitoring,
+# user kick/block/rejoin logic, timed hints, and captive portal handling.
+# ----------------------------------------------------------------------------
 
-# power-wifi-sound-controls.sh
-# Full-feature utility by Liam + Copilot
-# Dependencies: curl, nmcli, w3m, tmux, alsa-utils, upower, rfkill
+#———— Configuration & Bootstrap ————————————————————————————————————————
+ROOT="$HOME/power-wifi-controls"
+mkdir -p \
+  "$ROOT/wifi-passwords" \
+  "$ROOT/wifi-blocked-users" \
+  "$ROOT/kicked" \
+  "$ROOT/logs" \
+  "$ROOT/captive-verified"
 
-# ----------- Startup: Ensure bettersound.sh is installed and run ------------
-echo "[🔧] Preparing better sound system..."
+LOGFILE="$ROOT/logs/hotspot-log.txt"
+REJOIN_CODE="8741-LIAMNET"
+MAX_ATTEMPTS=3
+HOTSPOT_SSID="PI-CONNECT"
+HOTSPOT_PASS="pi-connect-pass"
+PASSWORD_FOR_OS="LiamsSecretPass123"
 
-BETTERSOUND_URL="https://raw.githubusercontent.com/Greenisus1/microsoftcopilotcodeusedonpi/main/bettersound.sh"
-BETTERSOUND_PATH="/usr/local/bin/bettersound.sh"
+# Ensure dependencies
+for cmd in nmcli curl tmux w3m arp avahi-resolve-address iptables lxterminal; do
+  command -v $cmd >/dev/null 2>&1 || sudo apt update && sudo apt install -y $cmd
+done
 
-if ! command -v curl &> /dev/null; then
-  echo "[⚠️] curl not found. Installing..."
-  apt update && apt install -y curl
-fi
+#———— Utility Functions ——————————————————————————————————————————
 
-if [ ! -f "$BETTERSOUND_PATH" ]; then
-  echo "[📥] Downloading bettersound.sh..."
-  curl -L "$BETTERSOUND_URL" -o "$BETTERSOUND_PATH"
-  chmod +x "$BETTERSOUND_PATH"
-else
-  echo "[✔️] bettersound.sh already installed."
-fi
-
-echo "[🚀] Executing bettersound.sh..."
-"$BETTERSOUND_PATH"
-
-# ----------- Utility Functions ------------------
-
+# Signal‐strength → ASCII bar
 get_signal_bar() {
-  strength=$1
-  case $strength in
+  s=$1
+  case $s in
     [0-9]|1[0-9]) echo "▁▁▁▁▁" ;;
     2[0-9]|3[0-9]) echo "▂▁▁▁▁" ;;
     4[0-9]|5[0-9]) echo "▂▃▁▁▁" ;;
@@ -40,160 +41,270 @@ get_signal_bar() {
   esac
 }
 
+# Captive‐portal check via Google’s 204 URL
 is_captive() {
-  status=$(curl -s -o /dev/null -w "%{http_code}" http://connectivity-check.gstatic.com/generate_204)
-  [[ "$status" != "204" ]]
+  code=$(curl -s -o /dev/null -w "%{http_code}" \
+    http://connectivity-check.gstatic.com/generate_204)
+  [[ "$code" != "204" ]]
 }
 
+# Launch minimal terminal browser for captive login
 open_captive_terminal() {
-  portal_url="http://neverssl.com"
-  echo "[🖥️] Launching captive browser in terminal..."
-  tmux new-session -d -s captive_browser "w3m $portal_url; read -p 'Press enter to exit captive browser...'"
+  tmux new-session -d -s captive_browser \
+    "w3m http://neverssl.com; read -p 'Press Enter to exit captive browser…'"
 }
 
-# ----------- Menu Logic ------------------
-
-show_menu() {
-  clear
-  echo "===== Power, WiFi, and Sound Controls ====="
-  echo "1) Power Status"
-  echo "2) WiFi Controls"
-  echo "3) Sound Controls"
-  echo "4) Exit"
-  echo "Choose an option:"
+# Handle blocked device’s rejoin‐code flow
+handle_rejoin() {
+  ip="$1"; mac="$2"; name="$3"
+  attempts=0
+  while (( attempts < MAX_ATTEMPTS )); do
+    echo "🔐 Blocked device “$name” ($ip) detected."
+    echo "Enter rejoin code:"
+    read -r code
+    if [[ "$code" == "$REJOIN_CODE" ]]; then
+      echo "✅ Access granted for $name."
+      rm -f "$ROOT/wifi-blocked-users/$ip.blocked" \
+            "$ROOT/wifi-blocked-users/$mac.blocked"
+      return
+    fi
+    (( attempts++ ))
+    echo "❌ Wrong code ($attempts/$MAX_ATTEMPTS)."
+  done
+  echo "🚫 Permanently banning $name."
+  {
+    echo "Device: $name"
+    echo "MAC: $mac"
+    echo "IP: $ip"
+    echo "Date: $(date)"
+  } > "$ROOT/wifi-blocked-users/$mac.blocked"
 }
 
-check_power() {
-  echo "--- Battery & Power Info ---"
-  upower -i /org/freedesktop/UPower/devices/line_power_AC | grep -E "online"
-  echo ""
+# Hint engine: emits random tips every 30–300s with weights
+start_hint_engine() {
+  hints=(
+    "Press 2 to stop hotspot"
+    "Press 3 to edit users"
+    "Press 9 to unban a user"
+  )
+  weights=(5 2 1)
+  while true; do
+    sleep $(( 30 + RANDOM % 270 ))
+    w0=${weights[0]}; w1=${weights[1]}; w2=${weights[2]}
+    pick=$(( RANDOM % (w0 + w1 + w2) ))
+    if (( pick < w0 )); then echo "[💡] ${hints[0]}"
+    elif (( pick < w0 + w1 )); then echo "[💡] ${hints[1]}"
+    else echo "[💡] ${hints[2]}"
+    fi
+  done
 }
 
-wifi_controls() {
-  echo "--- WiFi Controls ---"
-  echo "1) View Status"
-  echo "2) Toggle WiFi"
-  echo "3) Create Hotspot"
-  echo "4) Relay Hotspot from Existing WiFi"
-  echo "5) Connect to Wi-Fi Network"
-  read -p "Select: " wifi_opt
+#———— Hotspot Monitor (launched in new terminal) —————————————————————
 
-  case $wifi_opt in
-    1) iwconfig ;;
-    2) rfkill list wifi && rfkill unblock wifi && echo "WiFi toggled." ;;
-    3)
-      read -p "Hotspot SSID: " ssid
-      read -p "Password (8+ chars): " pass
-      nmcli dev wifi hotspot ifname wlan0 ssid "$ssid" password "$pass"
-      ;;
-    4)
-      read -p "Source SSID: " src_ssid
-      read -p "Source Password: " src_pass
-      read -p "Relay SSID: " relay_ssid
-      read -p "Relay Password: " relay_pass
-      nmcli dev wifi connect "$src_ssid" password "$src_pass"
-      nmcli dev wifi hotspot ifname wlan1 ssid "$relay_ssid" password "$relay_pass"
-      ;;
-    5) connect_to_wifi ;;
-    *) echo "Invalid option" ;;
-  esac
+monitor_hotspot() {
+  echo "Type 1 to start hotspot cloning \"$SSID_TO_CLONE\" → \"$HOTSPOT_SSID\""
+  read -n1 k; echo
+  if [[ "$k" != "1" ]]; then
+    echo "Canceled."; exit 0
+  fi
+
+  # connect upstream
+  echo "[🔄] Connecting to $SSID_TO_CLONE..."
+  nmcli dev wifi connect "$SSID_TO_CLONE" password "$CLONE_PASS"
+
+  # start hotspot
+  nmcli connection delete "$HOTSPOT_SSID" &>/dev/null
+  nmcli dev wifi hotspot ifname wlan1 ssid "$HOTSPOT_SSID" password "$HOTSPOT_PASS"
+  echo "[✅] Hotspot \"$HOTSPOT_SSID\" active."
+
+  start_hint_engine & hint_pid=$!
+
+  declare -A cmap
+  while true; do
+    echo "⟵ Monitoring clients on $HOTSPOT_SSID ⟶"
+    clients=$(arp -n | grep wlan1 | awk '{print $1":"$3}')
+    idx=0
+
+    for c in $clients; do
+      ip="${c%%:*}"; mac="${c##*:}"
+      name=$(avahi-resolve-address "$ip" 2>/dev/null | awk '{print $2}')
+      name=${name:-UnknownDevice}
+      time=$(date "+%H:%M:%S %d/%m/%Y")
+      tag=$(echo {A..Z} | sed -n "$((idx+1))p")
+      echo "$tag) $name : $ip @ $time"
+      echo "$name : $ip @ $time" >> "$LOGFILE"
+      cmap[$tag]="$ip:$mac:$name"
+
+      if [[ -f "$ROOT/kicked/$ip.kicked" ]] ||
+         [[ -f "$ROOT/wifi-blocked-users/$ip.blocked" ]] ||
+         [[ -f "$ROOT/wifi-blocked-users/$mac.blocked" ]]; then
+
+        echo "WARN: $name rejoined. D=block, E=ignore, F=block MAC"
+        read -n1 r; echo
+        case "$r" in
+          D) touch "$ROOT/wifi-blocked-users/$ip.blocked";;
+          E) echo "Ignored.";;
+          F) iptables -A INPUT -m mac --mac-source "$mac" -j DROP;;
+          *) echo "—";;
+        esac
+        handle_rejoin "$ip" "$mac" "$name"
+      fi
+
+      (( idx++ ))
+    done
+
+    echo "Actions: 2=Stop, 3=Kick, 9=Unban, P=PowerMenu"
+    read -n1 a; echo
+    case "$a" in
+      2) echo "Stopping hotspot…"; nmcli connection down "$HOTSPOT_SSID"; kill $hint_pid; break ;;
+      3)
+        echo "Kick which? (A–Z):"; read -n1 k; echo
+        info="${cmap[$k]}"
+        [[ $info ]] && touch "$ROOT/kicked/${info%%:*}.kicked" && echo "Kicked ${info##*:}";;
+      9)
+        banned=( "$ROOT/wifi-blocked-users"/*.blocked )
+        if [[ ${#banned[@]} -eq 0 ]]; then
+          echo "All clear—no banned users."
+        else
+          for i in "${!banned[@]}"; do
+            nm=$(grep '^Device:' "${banned[i]}" | cut -d: -f2-)
+            echo "$i) ${nm}"
+          done
+          read -p "Unban index: " ui
+          rm "${banned[ui]}"
+          echo "Unbanned."
+        fi;;
+      P)
+        # call power menu in this session
+        ;;
+      *)
+        echo "—";;
+    esac
+
+    sleep 5
+  done
+  exit 0
 }
+
+#———— Wi-Fi Connect Function ———————————————————————————————————————
 
 connect_to_wifi() {
-  echo "[📶] Scanning for Wi-Fi networks..."
-  base_dir="$HOME/power-wifi-controls/wifi-passwords"
-  mkdir -p "$base_dir"
+  mkdir -p "$ROOT/wifi-passwords"
+  echo "[📡] Scanning Wi-Fi..."
+  mapfile -t lines < <(
+    nmcli -t -f SSID,SECURITY,SIGNAL dev wifi | grep -v '^:' | sort -u
+  )
 
-  mapfile -t network_list < <(nmcli -t -f SSID,SECURITY,SIGNAL dev wifi | grep -v '^:' | sort -u)
-
-  declare -a ssids
-  i=1
-  for entry in "${network_list[@]}"; do
-    IFS=: read -r ssid security signal <<< "$entry"
-    [ -z "$ssid" ] && continue
-    ssids+=("$ssid")
-
-    bar=$(get_signal_bar "$signal")
-    pass_file="$base_dir/$ssid.txt"
-
-    captive=""
-    if is_captive; then captive="(CAPTIVE)"; fi
-
-    if [[ "$security" == "--" || -f "$pass_file" ]]; then
-      icon="🔓"
-    else
-      icon="🔒"
-    fi
-
-    echo "$i) $ssid [$bar $signal%] $icon $captive"
-    ((i++))
+  for i in "${!lines[@]}"; do
+    IFS=: read -r ss sec sig <<< "${lines[i]}"
+    bar=$(get_signal_bar "$sig")
+    pf="$ROOT/wifi-passwords/$ss.txt"
+    if [[ "$sec" == "--" || -f "$pf" ]]; then icon="🔓"; else icon="🔒"; fi
+    cap=""
+    is_captive && cap="(CAPTIVE)"
+    printf "%2d) %s [%s %2d%%] %s %s\n" $((i+1)) "$ss" "$bar" "$sig" "$icon" "$cap"
   done
 
-  read -p "Choose a network number: " choice
-  ssid="${ssids[$((choice-1))]}"
-  pass_file="$base_dir/$ssid.txt"
+  read -p "Choose network #: " n
+  sel="${lines[n-1]}"
+  IFS=: read -r ss sec sig <<< "$sel"
+  pf="$ROOT/wifi-passwords/$ss.txt"
 
-  if [[ -f "$pass_file" ]]; then
-    echo "[🔐] Using saved password for $ssid."
-    password=$(<"$pass_file")
-  elif [[ "$security" != "--" ]]; then
-    read -p "Enter password for $ssid (only needed once): " password
-    echo "$password" > "$pass_file"
+  if [[ -f $pf ]]; then
+    pw=$(<"$pf")
+  elif [[ "$sec" != "--" ]]; then
+    read -p "Password for $ss: " pw
+    echo "$pw" > "$pf"
   fi
 
-  echo "[🔄] Connecting to $ssid..."
-  if nmcli dev wifi connect "$ssid" password "$password"; then
-    echo "[✅] Connected successfully."
-
+  nmcli dev wifi connect "$ss" password "$pw"
+  if [[ $? -eq 0 ]]; then
+    echo "Connected."
     if is_captive; then
-      echo "[🌐] Captive portal detected."
+      echo "Captive detected—launching browser..."
       open_captive_terminal
-      mkdir -p "$HOME/power-wifi-controls/captive-verified"
-      touch "$HOME/power-wifi-controls/captive-verified/${ssid}.ok"
-      echo "[🛡️] Verified captive network saved."
+      touch "$ROOT/captive-verified/$ss.ok"
     fi
-
   else
-    echo "[❌] Connection failed."
-    read -p "WOULD YOU LIKE TO RESTART YOUR PI/LINUX? (Y,n): " restart_ans
-    [[ "$restart_ans" =~ ^[Yy]$ ]] && reboot
+    echo "Failed. Restart? (Y/n)"
+    read -n1 r; [[ $r =~ [Yy] ]] && sudo reboot
   fi
 }
 
-sound_controls() {
-  echo "--- Sound Controls ---"
-  echo "Available Audio Devices:"
-  aplay -l | grep '^card'
+#———— Hotspot Clone Launcher (main menu) ————————————————————————————
 
-  read -p "Enter card number (e.g., 0): " card_num
-  read -p "Enter device number (e.g., 0): " device_num
-  device="hw:${card_num},${device_num}"
+clone_hotspot() {
+  mapfile -t nets < <(nmcli -t -f SSID dev wifi | grep -v '^$')
+  echo "Available to clone:"
+  for i in "${!nets[@]}"; do echo "$i) ${nets[i]}"; done
+  read -p "Select #: " ci
+  export SSID_TO_CLONE="${nets[ci]}"
+  read -p "Password for $SSID_TO_CLONE: " CLONE_PASS
+  export HOTSPOT_PASS
 
-  echo "Selected output: $device"
-  echo "1) Volume Up"
-  echo "2) Volume Down"
-  echo "3) Mute / Unmute"
-  read -p "Select: " sound_opt
+  lxterminal -t HOTSPOTLOGANDSHUTDOWN -e \
+    bash -c "SSID_TO_CLONE='$SSID_TO_CLONE' CLONE_PASS='$CLONE_PASS' \
+    HOTSPOT_PASS='$HOTSPOT_PASS' \"$0\" monitor-hotspot" &
+  echo "Hotspot monitor launched in new tab."
+}
 
-  case $sound_opt in
-    1) amixer -D "$device" set Master 5%+ ;;
-    2) amixer -D "$device" set Master 5%- ;;
-    3) amixer -D "$device" set Master toggle ;;
-    *) echo "Invalid option" ;;
+#———— Power Menu ———————————————————————————————————————————————
+
+power_menu() {
+  echo "--- POWER MENU ---"
+  echo " 1) Restart    2) Shutdown     3) Update"
+  echo " 4) Update→1h  5) Update+Down  6) Up→1h+Down"
+  echo " 7) Update+Reboot 8) Update+Logout  9) Logout"
+  echo "10) Update×2  11) Update+Uninstall Pi OS"
+  echo "12) Update+Uninstall→Linux  13) IBM takeover"
+  read -p "Choice: " o
+  case $o in
+    1) sudo reboot ;;
+    2) sudo shutdown now ;;
+    3) sudo apt update && sudo apt upgrade -y ;;
+    4) sleep 3600; sudo apt update && sudo apt upgrade -y ;;
+    5) sudo apt update && sudo apt upgrade -y; sudo shutdown now ;;
+    6) sleep 3600; sudo apt update && sudo apt upgrade -y; sudo shutdown now ;;
+    7) sudo apt update && sudo apt upgrade -y; sudo reboot ;;
+    8) sudo apt update && sudo apt upgrade -y; pkill -KILL -u "$USER" ;;
+    9) pkill -KILL -u "$USER" ;;
+    10) sudo apt update && sudo apt upgrade -y; sudo apt update && sudo apt upgrade -y ;;
+    11) echo "[⚠️] Pi OS uninstall skipped for safety." ;;
+    12) echo "[🔄] Linux install simulated…" ;;
+    13)
+      read -sp "Pass: " p; echo
+      if [[ "$p" == "$PASSWORD_FOR_OS" ]]; then
+        echo "[💾] Backing up…"
+        mkdir -p ~/pi_backup_external
+        cp -r /etc ~/pi_backup_external 2>/dev/null
+        echo "[⚙️] Installing IBM OS… (simulated)"
+      else
+        echo "[⛔] Bad password."
+      fi
+      ;;
+    *) echo "Invalid." ;;
   esac
 }
 
-# ----------- Main Loop ------------------
+#———— Main Menu Loop —————————————————————————————————————————————
 
 while true; do
-  show_menu
-  read -p "> " choice
-  case $choice in
-    1) check_power ;;
-    2) wifi_controls ;;
-    3) sound_controls ;;
-    4) echo "Bye!" && exit ;;
-    *) echo "Invalid selection" ;;
+  cat <<EOF
+
+===== Liam’s Pi-Connect Guardian =====
+ 1) Power Controls
+ 2) Connect to Wi-Fi
+ 3) Clone & Monitor Hotspot
+ 4) Exit
+=====================================
+
+EOF
+  read -p "Select: " m
+  case $m in
+    1) power_menu ;;
+    2) connect_to_wifi ;;
+    3) clone_hotspot ;;
+    4) echo "Bye!"; exit 0 ;;
+    *) echo "Invalid." ;;
   esac
-  read -p "Press enter to continue..." dummy
 done

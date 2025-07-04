@@ -1,0 +1,9 @@
+custom commands for a terminal-cloning-wifi-networks
+
+
+
+// spacing:
+ to_previus-two_tabs
+// commands:
+  1.  network.shutdown    -    shutdowns the created network
+  2.  network.status      -    checks the status of the created network using speedtest.sh stored in

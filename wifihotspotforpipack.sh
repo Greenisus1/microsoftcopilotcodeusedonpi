@@ -1,5 +1,5 @@
 #!/bin/bash
-# 🔥 Wi-Fi Hotspot Creator + Monitor for Raspberry Pi
+# 📡 wifihotspotforpipack.sh — Hotspot Creator & Monitor for Raspberry Pi
 
 ROOT="$HOME/power-wifi-controls"
 mkdir -p "$ROOT/logs" "$ROOT/kicked" "$ROOT/wifi-blocked-users"
@@ -46,4 +46,3 @@ while true; do
   done
   sleep 10
 done
-

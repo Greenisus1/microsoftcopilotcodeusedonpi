@@ -1,360 +1,254 @@
 #!/bin/bash
-# hotspot_clone.sh – Script to clone/extend a Wi-Fi hotspot on Raspberry Pi
-# 
-# This script either connects to an existing Wi-Fi network or starts a Wi-Fi hotspot (Access Point),
-# effectively turning the Raspberry Pi into a Wi-Fi-to-Wi-Fi router or repeater. 
-# It handles lock files to prevent multiple instances, and includes a force-start flag 
-# to override locks. It also logs crashes for debugging.
+#   _   _    ___  ____   ____         ___     _                 
+#  | | | |  / _ \|  _ \ / ___|  ___  / _ \   / \   ___ ___ ___  
+#  | |_| | | | | | |_) | |  _  / _ \| | | | / _ \ / __/ __/ _ \ 
+#  |  _  | | |_| |  __/| |_| | (_) | |_| |/ ___ \ (_| (_|  __/ 
+#  |_| |_|  \___/|_|    \____|\___/ \___//_/   \_\___\___\___| 
+#  
+#  Raspberry Pi Wi-Fi Hotspot Clone Script
+#  Version 1.0
 #
-# Usage:
-#   sudo ./hotspot_clone.sh [--force] [--no-log] [--help]
-# 
-# Options:
-#   --force   (-f) : Ignore any existing lock and force the script to run.
-#   --no-log       : Disable logging to file (run quietly, except crash reports).
-#   --help         : Display usage information.
+#  This script connects to a specified Wi-Fi network and clones it as a wireless hotspot (access point).
+#  It ensures only one instance runs at a time (using a lock file), can bypass the lock with a force flag,
+#  and generates a crash report if any error occurs during execution.
 #
-# Requirements:
-#   - Bash shell
-#   - NetworkManager with nmcli (for managing Wi-Fi connections)
-#   - Appropriate privileges (script likely needs to run as root to control networking)
+#  Usage: sudo ./hotspot_clone.sh [--force-start] [--ssid <name>] [--pass <password>] [--help]
+#    --force-start   Bypass the lock file check and force the hotspot to start (use with caution).
+#    --ssid <name>   SSID of the Wi-Fi network to clone (overrides the default TARGET_SSID configured below).
+#    --pass <pass>   Password for the Wi-Fi network to clone (overrides the default TARGET_PASS configured below).
+#    --help          Show this help message and exit.
 #
-# Version 2.0 – Updated to address lock file conflicts, here-doc syntax, and nmcli field issues.
-#             – Added error trapping and debug logging features.
+#  Ensure you run this script as root (sudo) since it requires network configuration privileges.
+#  The script will:
+#    - Acquire a lock to prevent multiple instances.
+#    - Optionally bypass the lock if --force-start is given.
+#    - Scan for the target Wi-Fi network and get its channel (and determine band).
+#    - Connect the Raspberry Pi to the target Wi-Fi network as a client.
+#    - Start a Wi-Fi hotspot (access point) on the Raspberry Pi with the same SSID and password (cloning the network).
+#    - The hotspot will operate on the same channel and band as the target network to allow simultaneous use of one Wi-Fi interface.
+#    - Enable internet sharing (NAT) from the Pi's Wi-Fi client connection to the hotspot.
+#    - Generate a crash log at /tmp/hotspot_crash.log if any errors occur, for debugging.
+#    - Clean up the lock file on exit.
 #
-# ----------------------------------------------------------------------------------------
+#  Note: The target Wi-Fi network (to be cloned) should be in range, and the Pi must have the correct password to connect to it.
+#        The Wi-Fi adapter must support AP mode (most Raspberry Pi onboard Wi-Fi do) and possibly concurrent AP+client operation.
+#        If the Pi cannot operate as client and AP simultaneously, this script will not work properly.
+#        It is assumed that NetworkManager is installed and managing the network interfaces (default on Raspberry Pi OS Bullseye/Bookworm).
+#        If NetworkManager is not used, some nmcli commands may not function as expected.
+#
+#  -- Begin Script --
 
-# Strict mode: exit on error, catch unset vars, and fail on pipeline errors
-set -Eeuo pipefail
+# Settings (defaults)
+TARGET_SSID="YourHotspotSSID"    # SSID of the Wi-Fi network to clone
+TARGET_PASS="YourHotspotPassword"  # Password of the Wi-Fi network to clone
+WLAN_IFACE="wlan0"              # Wi-Fi interface to use for connecting and hotspot (usually wlan0 on RPi)
+LOCK_FILE="/var/run/hotspot_clone.lock"  # Lock file to prevent simultaneous runs
+CRASH_LOG="/tmp/hotspot_crash.log"       # Crash report log file
 
-# Configuration Variables (adjust these as needed)
-WIFI_DEV="wlan0"                        # Wi-Fi interface name to use for hotspot (e.g., built-in Wi-Fi)
-HOTSPOT_SSID="PiRepeater"               # SSID for the hotspot mode (when acting as AP)
-HOTSPOT_PASS="ChangeMeQuick!"           # Password for the hotspot (8+ characters, WPA2)
-HOTSPOT_CHANNEL="default"              # Channel for hotspot (e.g., "6" or "auto"/"default" for auto-selection)
-HOTSPOT_BAND="auto"                    # Band for hotspot: "auto", or "2.4", "5" to prefer, if device supports
-
-# Lock file path
-LOCK_FILE="/tmp/hotspot_clone.lock"
-
-# Log file for runtime information and crash reports
-LOG_FILE="/var/log/hotspot_clone.log"
-ERROR_LOG="/var/log/hotspot_clone_error.log"
-
-# Flags (default values)
+# Flags
 FORCE_START=0
-LOGGING_ENABLED=1
 
-# Print usage information
-show_usage() {
-    echo "Usage: $0 [--force] [--no-log] [--help]"
-    echo "  --force, -f    Bypass lock and force start even if another instance is detected."
-    echo "  --no-log       Disable detailed logging to $LOG_FILE (only errors will be logged)."
-    echo "  --help         Show this help message."
+# Function: Display help/usage information
+show_help() {
+  echo "Usage: $0 [--force-start] [--ssid <name>] [--pass <password>] [--help]"
+  echo "  --force-start   Bypass the lock file check and force start the hotspot."
+  echo "  --ssid <name>   SSID of the Wi-Fi network to clone (overrides default)."
+  echo "  --pass <pass>   Password of the Wi-Fi network to clone (overrides default)."
+  echo "  --help          Show this help message."
 }
 
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -f|--force)
-            FORCE_START=1
-            shift
-            ;;
-        --no-log)
-            LOGGING_ENABLED=0
-            shift
-            ;;
-        --help)
-            show_usage
-            exit 0
-            ;;
-        -*)
-            echo "Unknown option: $1"
-            show_usage
-            exit 1
-            ;;
-        *)
-            # Ignore non-option arguments (or handle as needed)
-            shift
-            ;;
-    esac
+  case "$1" in
+    --force-start|-f|--force)
+      FORCE_START=1
+      shift
+      ;;
+    --ssid|-s)
+      if [[ -n "$2" ]]; then
+        TARGET_SSID="$2"
+        shift 2
+      else
+        echo "Error: --ssid requires an argument." >&2
+        exit 1
+      fi
+      ;;
+    --pass|--password|-p)
+      if [[ -n "$2" ]]; then
+        TARGET_PASS="$2"
+        shift 2
+      else
+        echo "Error: --pass requires an argument." >&2
+        exit 1
+      fi
+      ;;
+    --help|-h)
+      show_help
+      exit 0
+      ;;
+    *)
+      echo "Error: Unknown option '$1'" >&2
+      show_help
+      exit 1
+      ;;
+  esac
 done
 
-# Logging function (writes to log file if enabled, and to stdout)
-log() {
-    local msg="$*"
-    local timestamp
-    timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
-    if (( LOGGING_ENABLED )); then
-        echo "[$timestamp] $msg" | tee -a "$LOG_FILE"
-    else
-        echo "[$timestamp] $msg"
-    fi
-}
-
-# Error reporting function for crashes (called via trap on ERR)
-err_report() {
-    local err_line="$1"
-    local err_cmd="$2"
-    local err_code="$3"
-    local timestamp
-    timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
-    # Log to error log file
-    {
-        echo "[$timestamp] ERROR: Command '${err_cmd}' failed at line ${err_line} with exit status ${err_code}."
-        echo "[$timestamp] (Script will abort and clean up resources.)"
-    } >> "$ERROR_LOG"
-    # Also echo to stdout/stderr for immediate feedback
-    >&2 echo "[$timestamp] *** Script error at line $err_line: '${err_cmd}' (exit code $err_code) ***"
-}
-
-# Cleanup function to release resources on exit
-cleanup() {
-    local exit_code=$?
-    # Remove lock file if it exists
-    if [[ -f "$LOCK_FILE" ]]; then
-        rm -f "$LOCK_FILE"
-        # Only log removal if logging is enabled
-        (( LOGGING_ENABLED )) && echo "[Cleanup] Removed lock file $LOCK_FILE." >> "$LOG_FILE"
-    fi
-    # If script terminated with error, note it
+# Crash report handler: this trap will capture any command errors and log diagnostic info.
+trap '{
+    exit_code=$?;
+    # Only log if an error (non-zero exit) occurred
     if [[ $exit_code -ne 0 ]]; then
-        # Log that we are exiting due to an error
-        local timestamp
-        timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
-        echo "[$timestamp] Script exited with error (status $exit_code). See $ERROR_LOG for details." >> "$LOG_FILE"
+      # Append error details to crash log
+      echo "[$(date)] ERROR: Command \"${BASH_COMMAND}\" failed with exit code $exit_code at line $LINENO." >> "$CRASH_LOG"
+      echo "Script terminated unexpectedly. See $CRASH_LOG for details." >&2
     fi
-    exit $exit_code
+  }' ERR
+
+# Ensure the script exits on error and catches pipe failures
+set -o errexit -o errtrace -o pipefail
+
+# Cleanup function to remove lock file (to be called on normal exit or interruption)
+cleanup() {
+  # Remove lock file if it exists and was created by this process
+  if [[ -n "$LOCK_FILE" && -f "$LOCK_FILE" ]]; then
+    local lock_pid
+    lock_pid="$(cat "$LOCK_FILE" 2>/dev/null)" || lock_pid=""
+    if [[ "$lock_pid" == "$$" ]]; then
+      rm -f "$LOCK_FILE"
+    fi
+  fi
 }
+# Set trap to call cleanup on script exit, and on Ctrl+C or termination signals
+trap cleanup EXIT
+trap cleanup SIGINT SIGTERM
 
-# Set traps for ERR and EXIT
-trap 'err_report ${LINENO} "$BASH_COMMAND" $?' ERR
-trap 'cleanup' EXIT
-
-# Function to initialize logging (rotate logs if needed, etc.)
-init_logging() {
-    if (( LOGGING_ENABLED )); then
-        # Ensure log directory exists
-        mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$ERROR_LOG")"
-        # Optionally, rotate old logs if they grow large (not implemented here, just truncating for simplicity)
-        : > "$LOG_FILE"   # truncate regular log
-        : > "$ERROR_LOG"  # truncate error log
-        log "=== Starting hotspot_clone script (PID $$) ==="
-    fi
-}
-
-# Acquire lock to ensure single instance
-acquire_lock() {
-    if [[ -f "$LOCK_FILE" ]]; then
-        local prev_pid
-        prev_pid="$(< "$LOCK_FILE")" 2>/dev/null || prev_pid=""
-        if [[ -n "$prev_pid" ]]; then
-            if kill -0 "$prev_pid" 2>/dev/null; then
-                if (( FORCE_START == 0 )); then
-                    echo "Another instance is running (PID $prev_pid). Use --force to override." >&2
-                    exit 1
-                else
-                    echo "Warning: Another instance (PID $prev_pid) is apparently running, but proceeding due to --force." >&2
-                fi
-            else
-                # Stale lock file
-                (( LOGGING_ENABLED )) && echo "[Lock] Removing stale lock file (PID $prev_pid not running)." >> "$LOG_FILE"
-            fi
-        else
-            (( LOGGING_ENABLED )) && echo "[Lock] Lock file present but empty, ignoring." >> "$LOG_FILE"
-        fi
-        # Remove the stale/empty lock file
-        rm -f "$LOCK_FILE"
-    fi
-
-    # Create new lock file with this PID
-    echo "$$" > "$LOCK_FILE"
-    # Double-check that lock file was created
-    if [[ ! -f "$LOCK_FILE" ]]; then
-        echo "Failed to create lock file at $LOCK_FILE. Exiting." >&2
+# Acquire lock to prevent multiple instances
+if [[ -f "$LOCK_FILE" ]]; then
+  # Lock file exists, check if process is alive
+  if read -r lockpid < "$LOCK_FILE"; then
+    if ps -p "$lockpid" > /dev/null 2>&1; then
+      # Another instance is running
+      if (( FORCE_START == 1 )); then
+        echo "Warning: Another instance (PID $lockpid) is indicated by lock file. Forcing start due to --force-start..." >&2
+      else
+        echo "Error: Another instance of this script is already running (PID $lockpid). Use --force-start to override." >&2
         exit 1
-    fi
-    (( LOGGING_ENABLED )) && echo "[Lock] Acquired lock with PID $$." >> "$LOG_FILE"
-}
-
-# Function to check if Pi is already connected to a Wi-Fi network (internet source)
-is_connected_to_wifi() {
-    # We use nmcli to see if the wifi interface has an active connection
-    local active_ssid
-    active_ssid=$(nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status | grep "^$WIFI_DEV:" | cut -d: -f4)
-    # If CONNECTION field is not empty and STATE is connected, we assume it's connected to Wi-Fi
-    # (Note: This assumes $WIFI_DEV is managed by NetworkManager)
-    if [[ -n "$active_ssid" && "$active_ssid" != "--" ]]; then
-        return 0  # true, has active connection
+      fi
     else
-        return 1  # false, not connected
+      # Stale lock (process not running)
+      echo "Notice: Removing stale lock file (process $lockpid not running)." >&2
+      rm -f "$LOCK_FILE"
     fi
-}
-
-# Function to scan available Wi-Fi networks and choose a target to connect (if any)
-scan_and_select_network() {
-    # This function scans for Wi-Fi networks. In a real script, you might match against preferred SSIDs or conditions.
-    log "Scanning for available Wi-Fi networks..."
-    # Use nmcli to list networks with relevant fields
-    # Fields: SSID, SECURITY, SIGNAL, FREQ
-    # We will output as tabular for parsing (no header with -t terse mode)
-    local scan_results
-    scan_results=$(nmcli -t -f SSID,SECURITY,SIGNAL,FREQ device wifi list 2>/dev/null) || true
-    # The output is lines like "MyWiFi:WPA2:75:2412"
-    if [[ -z "$scan_results" ]]; then
-        log "No Wi-Fi networks found in scan."
-        return 1
-    fi
-
-    # As an example, pick the strongest open network (just for demonstration of selection logic)
-    local best_ssid=""
-    local best_signal=0
-    local best_security=""
-    local best_freq=""
-    while IFS=':' read -r ssid sec signal freq; do
-        # If no SSID (hidden network), skip
-        [[ -z "$ssid" ]] && continue
-        # Prefer open networks (no security) or use any available
-        # Here, check if sec contains "WPA" or "WEP" or is "--"
-        if [[ "$sec" == "--" ]]; then
-            # Open network, no security, treat signal
-            signal=${signal:-0}
-            if (( signal > best_signal )); then
-                best_signal=$signal
-                best_ssid="$ssid"
-                best_security="$sec"
-                best_freq="$freq"
-            fi
-        else
-            # If all networks are secure, we could choose the strongest secure one if we have credentials (not implemented here).
-            # For now, skip secured networks in this selection example.
-            :
-        fi
-    done <<< "$scan_results"
-
-    if [[ -n "$best_ssid" ]]; then
-        log "Selected network '$best_ssid' (Signal ${best_signal}%)."
-        # Optionally, determine band from frequency for logging
-        if [[ "$best_freq" -ge 3000 ]]; then
-            log "Target network is on 5 GHz band (Frequency ${best_freq} MHz)."
-        else
-            log "Target network is on 2.4 GHz band (Frequency ${best_freq} MHz)."
-        fi
-        # Return the chosen SSID (global variable or echo output)
-        SELECTED_SSID="$best_ssid"
-        return 0
-    else
-        log "No suitable open network found to connect."
-        return 1
-    fi
-}
-
-# Function to connect to a Wi-Fi network (as a client)
-connect_to_wifi() {
-    local ssid="$1"
-    if [[ -z "$ssid" ]]; then
-        log "No SSID provided to connect_to_wifi."
-        return 1
-    fi
-    log "Attempting to connect to Wi-Fi network: $ssid"
-    # If the network is open (no passphrase)
-    # Note: In a real scenario, we might need to handle known networks with saved credentials.
-    nmcli device wifi connect "$ssid" ifname "$WIFI_DEV" 1>>"$LOG_FILE" 2>>"$LOG_FILE" || {
-        log "Failed to connect to Wi-Fi network '$ssid'."
-        return 1
-    }
-    log "Successfully connected to Wi-Fi network '$ssid'."
-    return 0
-}
-
-# Function to start the hotspot (Access Point mode)
-start_hotspot() {
-    log "Starting hotspot (AP mode) on $WIFI_DEV ..."
-    # If a connection named "Hotspot" already exists, we may reuse it. Otherwise, nmcli can create a hotspot.
-    # Use nmcli's built-in hotspot command:
-    local nm_out
-    if [[ "$HOTSPOT_CHANNEL" == "default" && "$HOTSPOT_BAND" == "auto" ]]; then
-        nm_out=$(nmcli device wifi hotspot ifname "$WIFI_DEV" ssid "$HOTSPOT_SSID" password "$HOTSPOT_PASS" 2>&1) || {
-            log "nmcli hotspot command failed: $nm_out"
-            return 1
-        }
-    else
-        # If specific channel or band preferences are set, create a custom connection profile
-        # First, delete existing Hotspot connection if present (to avoid duplicates)
-        nmcli connection delete "Hotspot" &>/dev/null || true
-        # Construct options for band and channel if specified
-        local band_option=""
-        local channel_option=""
-        if [[ "$HOTSPOT_BAND" == "5" || "$HOTSPOT_BAND" == "5GHz" || "$HOTSPOT_BAND" == "a" ]]; then
-            band_option="band=a"
-        elif [[ "$HOTSPOT_BAND" == "2.4" || "$HOTSPOT_BAND" == "2.4GHz" || "$HOTSPOT_BAND" == "bg" ]]; then
-            band_option="band=bg"
-        fi
-        if [[ "$HOTSPOT_CHANNEL" != "default" && "$HOTSPOT_CHANNEL" != "auto" ]]; then
-            channel_option="channel=$HOTSPOT_CHANNEL"
-        fi
-        nm_out=$(nmcli device wifi hotspot ifname "$WIFI_DEV" ssid "$HOTSPOT_SSID" password "$HOTSPOT_PASS" $band_option $channel_option 2>&1) || {
-            log "nmcli hotspot (with band/channel) failed: $nm_out"
-            return 1
-        }
-    fi
-    log "Hotspot started. SSID: $HOTSPOT_SSID  Password: $HOTSPOT_PASS"
-    return 0
-}
-
-# Function to stop the hotspot (if needed) and disconnect
-stop_hotspot() {
-    log "Stopping hotspot on $WIFI_DEV..."
-    nmcli connection down Hotspot &>/dev/null || true
-    # Optionally delete the hotspot connection profile to reset settings
-    nmcli connection delete Hotspot &>/dev/null || true
-    log "Hotspot stopped."
-}
-
-# -----------------------------------
-# Main Script Logic
-# -----------------------------------
-init_logging        # Initialize or reset logs
-acquire_lock        # Obtain lock file (or exit if another instance is active and no --force)
-
-# Determine action: connect to existing Wi-Fi or start hotspot
-if is_connected_to_wifi; then
-    log "Already connected to a Wi-Fi network. Hotspot mode not required."
-    # Optionally, if already connected and hotspot is running, we might stop hotspot. 
-    # For now, just exit as nothing needs to be done.
-    exit 0
-else
-    log "Not connected to any Wi-Fi. Will try to connect as client, otherwise enable hotspot."
-    if scan_and_select_network; then
-        # We found a network to connect to (SSID in SELECTED_SSID)
-        if connect_to_wifi "$SELECTED_SSID"; then
-            log "Operating as Wi-Fi client (repeater source). Hotspot mode can be disabled."
-            # If needed, ensure hotspot is off
-            nmcli connection down Hotspot &>/dev/null || true
-            # Script could end here, as we connected to Wi-Fi successfully.
-            exit 0
-        fi
-    fi
-    # If we reach here, either no network was chosen or connection failed. Enable hotspot as fallback.
-    if start_hotspot; then
-        log "Hotspot active. Clients can connect to SSID '$HOTSPOT_SSID'."
-        # At this point, the Pi is an AP. If internet sharing is needed (e.g., via another interface like eth0),
-        # that configuration would be done here (for example, enable IP forwarding, DNS/DHCP via dnsmasq, etc.).
-        # NetworkManager's "hotspot" sets up a shared connection if another uplink is available (Ethernet).
-        :
-    else
-        log "Failed to start hotspot. No network connectivity available."
-        # Still consider exiting with error code, which will trigger error trap logging as well.
-        exit 1
-    fi
+  else
+    # Could not read lock file, remove it
+    rm -f "$LOCK_FILE"
+  fi
 fi
 
-# End of main logic. The script will continue running (if hotspot is up, it might just wait or do periodic checks).
-# In this example, we’ll just sleep to keep the script active, simulating a service that monitors connections.
-while true; do
-    sleep 60
-    # In a real script, you might periodically check if the upstream network appears and then switch modes, etc.
-    # For demonstration, we'll break after some interval or condition. Here, just run indefinitely unless externally stopped.
-done
+# Create a new lock file with current PID
+echo $$ > "$LOCK_FILE" || { echo "Error: Unable to create lock file at $LOCK_FILE." >&2; exit 1; }
 
-# (The trap on EXIT will handle cleanup when the script is terminated.)
+# At this point, we have the lock (or forced start ignoring existing lock)
+
+# Optional: trigger a fresh Wi-Fi scan to ensure up-to-date results
+echo "Scanning for Wi-Fi networks..." 
+nmcli device wifi rescan >/dev/null 2>&1 || true  # not critical if rescan fails (may need sudo if not root, but script is run as root)
+
+# Find the target network from scan results
+echo "Looking for target network SSID: '$TARGET_SSID'"
+# We will parse the nmcli output to get channel (and possibly band).
+# Use nmcli in terse mode to get SSID,CHAN fields for easier parsing.
+network_line="$(nmcli -t -f SSID,CHAN device wifi list | grep -F -m1 "${TARGET_SSID}")" || network_line=""
+if [[ -z "$network_line" ]]; then
+  echo "Error: Target network '$TARGET_SSID' not found in scan results. Ensure it is in range and broadcasting." >&2
+  exit 1
+fi
+
+# Parse the retrieved line. It should be in format "SSID:CHAN" (terse mode with -t uses ":" as delimiter).
+IFS=':' read -r found_ssid found_chan <<< "$network_line"
+# (Note: If SSID itself contains a colon, this parsing could break. In such a case, using a different delimiter or a more robust parsing method would be needed.)
+
+# Double-check we got the correct SSID (in case of partial match). We'll ensure case-sensitive match.
+if [[ "$found_ssid" != "$TARGET_SSID" ]]; then
+  echo "Warning: Found SSID '$found_ssid' does not exactly match target '$TARGET_SSID'. Using it anyway." >&2
+  # (If multiple networks share similar names, this might pick the wrong one. Ideally, ensure unique SSID.)
+fi
+
+# Channel number from scan:
+CHANNEL="$found_chan"
+if [[ -z "$CHANNEL" ]]; then
+  echo "Error: Could not determine channel for SSID '$TARGET_SSID'." >&2
+  exit 1
+fi
+
+# Determine Wi-Fi band based on channel number for AP configuration:
+# Channels 1-14 are 2.4GHz (band "bg"), channels >= 36 are 5GHz (band "a").
+if [[ "$CHANNEL" -le 14 ]]; then
+  BAND="bg"
+else
+  BAND="a"
+fi
+
+echo "Found network '$found_ssid' on channel $CHANNEL (band $BAND)."
+
+# Connect to the target Wi-Fi network as a client (using NetworkManager via nmcli).
+echo "Connecting Raspberry Pi to Wi-Fi network '$TARGET_SSID'..."
+# If the network is already configured in NetworkManager (with same SSID), nmcli will use existing settings if possible.
+# We supply the password in case it's a new connection or to ensure correct credentials.
+nmcli device wifi connect "$TARGET_SSID" password "$TARGET_PASS" ifname "$WLAN_IFACE" >/dev/null 2>&1 && \
+  echo "Successfully connected to '$TARGET_SSID'." || {
+    echo "Error: Failed to connect to Wi-Fi network '$TARGET_SSID'. Check the password or network availability." >&2
+    # If connection fails, we should exit (the ERR trap will log details to crash log).
+    exit 1
+}
+
+# Wait for a valid IP address on the Wi-Fi interface (to ensure internet connectivity is up).
+echo "Obtaining IP address for the Wi-Fi connection..."
+# We poll nmcli for IP; alternative is to use a short sleep or check /dhclient, but we'll use nmcli connection status.
+# Timeout after ~15 seconds if not obtained.
+for i in {1..15}; do
+  # Check if the interface has IP (ip addr show could be used, or nmcli -f IP4.ADDRESS device show)
+  ip_addr=$(nmcli -g IP4.ADDRESS device show "$WLAN_IFACE" 2>/dev/null | head -n1)
+  if [[ -n "$ip_addr" ]]; then
+    break
+  fi
+  sleep 1
+done
+if [[ -z "$ip_addr" ]]; then
+  echo "Warning: IP address not obtained for $WLAN_IFACE after 15s. Continuing anyway." >&2
+else
+  echo "Assigned IP: $ip_addr"
+fi
+
+# Configure and start the Wi-Fi hotspot (AP) on the same interface using NetworkManager.
+AP_CON_NAME="HotspotClone"  # Name for the hotspot connection profile
+echo "Setting up hotspot (AP) with SSID '$TARGET_SSID'..."
+# Remove any existing AP connection with same name if present, to avoid conflicts.
+nmcli connection delete "$AP_CON_NAME" >/dev/null 2>&1 || true
+
+# Add a new Wi-Fi connection for AP mode.
+nmcli connection add type wifi ifname "$WLAN_IFACE" mode ap con-name "$AP_CON_NAME" autoconnect no ssid "$TARGET_SSID"
+
+# Set the Wi-Fi band and channel for the AP
+nmcli connection modify "$AP_CON_NAME" 802-11-wireless.band "$BAND" 802-11-wireless.channel "$CHANNEL"
+
+# Use the same security (WPA2-PSK by default) and passphrase as the target network to truly clone credentials.
+nmcli connection modify "$AP_CON_NAME" 802-11-wireless.security key-mgmt wpa-psk
+nmcli connection modify "$AP_CON_NAME" wifi-sec.psk "$TARGET_PASS"
+
+# Enable IPv4 sharing (this sets up DHCP and NAT for clients connecting to the AP).
+nmcli connection modify "$AP_CON_NAME" ipv4.method shared
+# (NetworkManager will assign a subnet (usually 10.42.x.0/24) for the hotspot and NAT traffic to the other interface.)
+
+# Bring up the hotspot connection.
+if nmcli connection up "$AP_CON_NAME" >/dev/null 2>&1; then
+  echo "Hotspot '$TARGET_SSID' is now active on channel $CHANNEL ($BAND band)."
+else
+  echo "Error: Failed to start hotspot. The Wi-Fi interface may not support concurrent AP mode, or another issue occurred." >&2
+  exit 1
+fi
+
+echo "Wi-Fi Hotspot clone setup complete. Clients can now connect to '$TARGET_SSID' through this Raspberry Pi."
+
+# Script completed successfully. The cleanup trap will remove the lock file.

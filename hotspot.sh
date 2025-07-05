@@ -58,7 +58,7 @@ die() {
 cleanup() {
   log "INFO" "Cleaning up hotspot and connections..."
   nmcli connection down "$HOTSPOT_CONN_NAME" &>/dev/null
-  rm -f "$LOCKFILE"
+  rm -rf "$LOCKFILE"
   info "Cleanup complete."
 }
 

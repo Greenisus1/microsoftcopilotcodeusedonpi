@@ -1,9 +1,28 @@
 custom commands for a terminal-cloning-wifi-networks
-
-
-
+note:
+when started it askes for a pin and it is saved for top level commands (must be 4 digets)
+what each line the user pops up as is   usr/NETWORK ~$[cmd area]
+also another thing is the user can use "admin.sudo set true" then there cmd prompt will look like "admin/NETWORK ~$[cmd area]"  if they use "admin.sudo set false" then it will look like "usr/NETWORK ~$[cmd area]"
+all comands will start with
+1. usr/NETWORK ~$[cmd area]
+2. admin/NETWORK ~$[cmd area]
+cmd area is where the command is"
+!!important!! if anywere has "selected→" in it then after → there should be a number if that is not a choice in that prompt AFTER IT IS SUBMITTED(enter) then the text in red "error: invalid option" then goes back to the last "selected→" area
 // spacing:
  to_previus-two_tabs
 // commands:
   1.  network.shutdown    -    shutdowns the created network
-  2.  network.status      -    checks the status of the created network using speedtest.sh stored in
+  2.  network.status      -    checks the status of the current wifi using https://github.com/Greenisus1/microsoftcopilotcodeusedonpi/blob/main/lemontest.sh
+  3.  network.users       -    in red says "ACCESS DENIED" unless admin.sudo has been run if so then shows users as "num) ipv4:devicename" listed until all have been shown if none then says "DENIED: no current users" !important! num meaning the user number every one of them is the past-number+1 and the first one starting at 0 then (2,3,4,5,6,7,etc) !important! then "selected →" pops up in the next line and then the user gets to select the user they want to edit propertes for them an example is "you selected 12.345.678.90:Example-IpadAIR  --click 1 to unconnect them,press 2 to block them from joining , press 3 to ban their mac adress and their ip and they can not see the network ever again unless you use overide:ban:[their-ip] then if they rejoin then their mac is detected and unblocked, press 0 to close" then "selected →" and then whatever they chose happens (note to the important text in the notes area)
+  4.  admin.sudo          -    this enables admin.sudo for the next command(unless admin.sudo set true/false is used ) make sure to check
+  5.  network.shutdown    - closes the network and closes the terminal used !important!(requires sudo)!important!
+  6.  help                - tells how each command works IN SIMPLER WORDS
+  7.  newterminal         - opens a new bash terminal
+  8.  code.bash [code]    - it should be like usr/network ~$ code.bash [bashcode]  making it so you can use a bash script in it any resaults from the command would be bash/ [text]
+  9.  disableadmin [pin]  - disables sudo,admin, and overide the pin is used in case of enableadmin is used
+  10. enableadmin [pin]   - if the pin is wrong 3 times then it says "the pin was(randomorder(pin,randomnumber(1000,9999),randomnumber(1000,9999))" and then says SHUTDOWN ENGAGED then closes terminal while shuting down the pi/linux or if emulated
+  11. unban [ip-adress]   - unbans the ip
+extras:
+if a command at the end ends with --overideerrors-- then admin.sudo is not needed
+if the user puts a command incorrectly then it says error 275 : invalid cmd . then it asks did you mean [possible-close-command]
+also if credits is ran then it says hi there greenisus1 made this silly

@@ -244,22 +244,22 @@ network_status() {
 ################################################################################
 
 show_help() {
-  cat <<-EOF
-  Available commands:
-    network.shutdown       – stop hotspot + exit (admin only)
-    network.status         – run speedtest (lemontest.sh)
-    network.users          – list & manage clients (admin only)
-    admin.sudo             – enable admin mode for one command
-    admin.sudo set true    – stay in admin mode
-    admin.sudo set false   – drop to user mode
-    enableadmin [pin]      – same as admin.sudo
-    disableadmin [pin]     – exit admin mode
-    newterminal            – open a new bash session
-    code.bash [bashcode]   – run inline bash
-    unban [IP]             – remove IP ban
-    credits                – show credits
-    help                   – this help text
-  EOF
+  cat <<EOF
+Available commands:
+  network.shutdown       – stop hotspot + exit (admin only)
+  network.status         – run speedtest (lemontest.sh)
+  network.users          – list & manage clients (admin only)
+  admin.sudo             – enable admin mode for one command
+  admin.sudo set true    – stay in admin mode
+  admin.sudo set false   – drop to user mode
+  enableadmin [pin]      – same as admin.sudo
+  disableadmin [pin]     – exit admin mode
+  newterminal            – open a new bash session
+  code.bash [bashcode]   – run inline bash
+  unban [IP]             – remove IP ban
+  credits                – show credits
+  help                   – this help text
+EOF
 }
 
 dispatch_cmd() {
